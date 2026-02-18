@@ -1,0 +1,20 @@
+Extension Errors Report
+SketchUp: 26.1.189
+OS: Windows 10 
+Ruby: 3.2.2
+
+Extension: Cialona BOM Exporter (0.1.0)
+Error: SyntaxError (C:/Users/Sergiu/work/cialona_bom_exporter/catalog/csv_provider.rb:102: syntax error, unexpected end-of-input)
+C:/Users/Sergiu/work/cialona_bom_exporter/main.rb:24:in `require_relative'
+C:/Users/Sergiu/work/cialona_bom_exporter/main.rb:24:in `block in <module:CialonaBOMExporter>'
+C:/Users/Sergiu/work/cialona_bom_exporter/main.rb:24:in `each'
+C:/Users/Sergiu/work/cialona_bom_exporter/main.rb:24:in `<module:CialonaBOMExporter>'
+C:/Users/Sergiu/work/cialona_bom_exporter/main.rb:9:in `<module:Logimaxx>'
+C:/Users/Sergiu/work/cialona_bom_exporter/main.rb:8:in `<top (required)>'
+C:/Program Files/SketchUp/SketchUp 2026/SketchUp/Tools/extensions.rb:197:in `require'
+C:/Program Files/SketchUp/SketchUp 2026/SketchUp/Tools/extensions.rb:197:in `load'
+C:/Users/Sergiu/AppData/Roaming/SketchUp/SketchUp 2026/SketchUp/Plugins/cialona_bom_exporter_loader.rb:19:in `register_extension'
+C:/Users/Sergiu/AppData/Roaming/SketchUp/SketchUp 2026/SketchUp/Plugins/cialona_bom_exporter_loader.rb:19:in `<module:CialonaBOMExporter>'
+C:/Users/Sergiu/AppData/Roaming/SketchUp/SketchUp 2026/SketchUp/Plugins/cialona_bom_exporter_loader.rb:5:in `<module:Logimaxx>'
+C:/Users/Sergiu/AppData/Roaming/SketchUp/SketchUp 2026/SketchUp/Plugins/cialona_bom_exporter_loader.rb:4:in `<top (required)>'
+

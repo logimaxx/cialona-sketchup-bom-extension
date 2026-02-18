@@ -1,0 +1,23 @@
+{
+    "$id": "https://cialona.local/schema/cialona-bom-ui.schema.json",
+    "title": "Cialona BOM UI Hints",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "BomItem": {
+        "type": "object",
+        "properties": {
+          "code": { "ui:widget": "catalogSearch", "ui:label": "Code", "ui:placeholder": "Search code or name…" },
+          "label": { "ui:widget": "text", "ui:label": "Label (optional)" },
+          "uom": { "ui:widget": "select", "ui:label": "Unit" },
+          "measure": { "ui:widget": "select", "ui:label": "Measurement rule" },
+          "multiplier": { "ui:widget": "number", "ui:label": "Multiplier", "ui:step": 0.01 },
+          "rounding.mode": { "ui:widget": "select", "ui:label": "Rounding" },
+          "rounding.step": { "ui:widget": "number", "ui:label": "Rounding step", "ui:step": 0.01 },
+          "params.include_holes": { "ui:widget": "checkbox", "ui:label": "Include holes (inner loops)" },
+          "params.material": { "ui:widget": "text", "ui:label": "Material name" }
+        }
+      }
+    }
+  }
+  

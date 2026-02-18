@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="attributes.css">
+  <title>BOM ruleset editor</title>
+  <style>
+    #attributes-container {
+      /* display: none; */
+    }
+  </style>
+</head>
+<body>
+  <div id="empty-selection-message" class="empty-selection-message">
+    Nothing selected
+  </div>
+  <div id="toolbar-actions" class="toolbar-actions hidden" aria-hidden="true">
+    <button type="button" id="btn-add-item" class="btn-add-item" onclick="addItem()">➕ Add rule</button>
+    <button type="button" id="btn-save" class="btn-save hidden" onclick="saveAttributes()">💾 Save</button>
+  </div>
+  <template id="attributes-template">
+    <form>
+      <fieldset>
+        <input type="hidden" name="ruleset_idx" value="0">
+        <input type="hidden" name="bom_category" value="">
+        <!-- <legend>BOM ruleset</legend> -->
+        <label>
+          <span>Code</span>
+          <div class="catalog-search-wrap">
+            <input type="text" name="bom" style="width: 100%;" autocomplete="off"
+              onkeyup="searchCatalog(this)" onfocus="searchCatalog(this)" onblur="hideCatalogDropdown()">
+            <ul id="catalog-dropdown" class="catalog-dropdown" style="display: none;"></ul>
+          </div>
+        </label>
+        <label>
+          <span>Label</span>
+          <input type="text" name="bom_label" style="width: 70px;">
+        </label>
+        <label>
+          <span>Measurement</span>
+          <select name="bom_measure">
+            <option value="count">Select measure</option>
+            <option value="count">Count</option>
+            <option value="top_area">Top area</option>
+            <option value="total_area">Total area</option>
+            <option value="material_area">Material area</option>
+            <option value="top_perimeter">Top perimeter</option>
+            <!-- <option value="edge_length">Edge length</option> -->
+            <option value="smart_length">Length</option>
+            <option value="bbox_volume">Bounding box volume</option>
+            <option value="bbox_dimensions">Bounding box dimensions</option>
+          </select>
+        </label>
+        <label>
+          <span>Unit of measure</span>
+          <select name="bom_uom">
+            <option value="pcs">pcs</option>
+            <option value="m2">m2</option>
+            <option value="mtr">mtr</option>
+            <option value="custom">custom</option>
+          </select>
+        </label>
+        <label>
+          <span>Rounding mode</span>
+          <select name="bom_rounding_mode">
+            <option value="none">None</option>
+            <option value="ceil">Ceil</option>
+            <option value="floor">Floor</option>
+            <option value="round">Round</option>
+          </select>
+        </label>
+        <label>
+          <span>Rounding step</span>
+          <input type="number" name="bom_rounding_step" style="width: 70px;" value="0.01">
+        </label>
+        
+        <button type="button" class="btn-delete-item" onclick="setDirty(this.form); var c=document.getElementById('attributes-container'); $(this.form).remove(); if(c&&c.querySelectorAll('form').length===0) ensureEmptyRulesPlaceholder(c);">❌ Delete</button>
+      </fieldset>
+    </form>
+  </template>
+  <div id="attributes-container">
+    
+  </div>
+  <!-- <script src="devtools.js"></script> -->
+  <script src="jquery.js"></script>
+  <script src="csv.js"></script>
+  <script src="catalog_search.js"></script>
+  <script src="attributes.js"></script>
+</body>
+</html>

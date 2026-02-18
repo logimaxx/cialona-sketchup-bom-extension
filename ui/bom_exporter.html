@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px/1.4 "Segoe UI", sans-serif; margin: 0; padding: 12px; background: #f0f2f5; }
+    h2 { margin: 0 0 12px; font-size: 16px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .toolbar button { padding: 6px 14px; cursor: pointer; }
+    .btn-run { background: #2171b8; color: #fff; border: none; border-radius: 4px; }
+    .btn-run:hover { background: #1a5a94; }
+    .btn-csv { background: #2d7d2d; color: #fff; border: none; border-radius: 4px; }
+    .btn-csv:hover { background: #236623; }
+    .btn-csv:disabled { background: #999; cursor: not-allowed; }
+    .status { margin-bottom: 10px; color: #555; font-size: 12px; }
+    .table-wrap { overflow: auto; max-height: 380px; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #e8eaed; font-weight: 600; position: sticky; top: 0; }
+    tr:hover { background: #f5f5f5; }
+    tr.bom-selectable { cursor: pointer; }
+    tr.bom-selectable:hover { background: #e3f2fd; }
+    .empty { color: #888; padding: 24px; text-align: center; }
+    .error { color: #b00; }
+    .section-title { font-size: 13px; margin: 16px 0 8px; color: #333; }
+    #section-without-rules .table-wrap { max-height: 220px; }
+  </style>
+  <title>Cialona BOM — Export 1</title>
+</head>
+<body>
+  <!-- <script src="devtools.js"></script> -->
+  <h2>BOM Export</h2>
+  <div class="toolbar">
+    <button type="button" class="btn-run" id="btn-run" onclick="runExport()">Run export</button>
+    <button type="button" class="btn-csv" id="btn-csv" disabled onclick="exportCsv()">Export to CSV</button>
+  </div>
+  <p class="status" id="status">Click «Run export» to generate the BOM from the current model.</p>
+
+  <div id="section-with-rules" style="display: none;">
+    <h3 class="section-title">Components with BOM rules</h3>
+    <div class="table-wrap">
+      <table id="report-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Code</th>
+            <th>Label</th>
+            <th>Measure</th>
+            <th>UOM</th>
+            <th>Quantity</th>
+            <th>Category</th>
+          </tr>
+        </thead>
+        <tbody id="report-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="section-without-rules" style="display: none;">
+    <h3 class="section-title">Components without BOM rules (count only)</h3>
+    <div class="table-wrap">
+      <table id="report-table-no-rules">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Quantity</th>
+          </tr>
+        </thead>
+        <tbody id="report-body-no-rules"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="section-geometry-only" style="display: none;">
+    <h3 class="section-title">Groups with geometry only (no components)</h3>
+    <div class="table-wrap">
+      <table id="report-table-geometry-only">
+        <thead>
+          <tr>
+            <th>Group</th>
+            <th>Quantity</th>
+          </tr>
+        </thead>
+        <tbody id="report-body-geometry-only"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <p id="empty-msg" class="empty">No data. Run export first.</p>
+
+  <script>
+    var reportRows = [];
+    var reportRowsWithoutRules = [];
+    var reportRowsGeometryOnly = [];
+
+    window.onExportResult = function(payload) {
+      console.log("[BOM Export] onExportResult called", payload ? "rows=" + (payload.rows && payload.rows.length) + " without_rules=" + (payload.rows_without_rules && payload.rows_without_rules.length) + " geometry_only=" + (payload.rows_geometry_only && payload.rows_geometry_only.length) : "no payload");
+      try {
+        if (payload && payload.error) {
+          document.getElementById("status").textContent = "Error: " + (payload.message || "Export failed.");
+          document.getElementById("status").className = "status error";
+          return;
+        }
+        reportRows = (payload && payload.rows) ? payload.rows : [];
+        reportRowsWithoutRules = (payload && payload.rows_without_rules) ? payload.rows_without_rules : [];
+        reportRowsGeometryOnly = (payload && payload.rows_geometry_only) ? payload.rows_geometry_only : [];
+        renderTable(reportRows, "report-body", reportRowCells);
+        renderTableNoRules(reportRowsWithoutRules);
+        renderTableGeometryOnly(reportRowsGeometryOnly);
+        var totalLines = reportRows.length + reportRowsWithoutRules.length + reportRowsGeometryOnly.length;
+        document.getElementById("btn-csv").disabled = totalLines === 0;
+        var unit = (payload && payload.model_length_unit) ? payload.model_length_unit : "in";
+        var unitNote = " Length/area/volume in model units (" + unit + ", " + unit + "\u00B2, " + unit + "\u00B3).";
+        var status = totalLines === 0 ? "No components or groups found." : "With rules: " + reportRows.length + ". Without rules: " + reportRowsWithoutRules.length + " type(s). Geometry-only groups: " + reportRowsGeometryOnly.length + "." + unitNote;
+        document.getElementById("status").textContent = status;
+        document.getElementById("status").className = "status";
+        document.getElementById("empty-msg").style.display = totalLines === 0 ? "block" : "none";
+      } catch (e) {
+        console.error("[BOM Export] onExportResult error", e);
+        document.getElementById("status").textContent = "Error: " + (e.message || String(e));
+        document.getElementById("status").className = "status error";
+      }
+    };
+
+    function reportRowCells(r) {
+      return [
+        escapeHtml(r.definition_name || ""),
+        escapeHtml(r.code || ""),
+        escapeHtml(r.label || ""),
+        escapeHtml(r.measure || ""),
+        escapeHtml(r.uom || ""),
+        escapeHtml(formatQuantity(r.quantity)),
+        escapeHtml(r.category || "")
+      ];
+    }
+
+    function makeRowSelectable(tr, selectEntityId) {
+      if (!selectEntityId) return;
+      tr.classList.add("bom-selectable");
+      tr.setAttribute("data-select-entity-id", String(selectEntityId));
+      tr.addEventListener("click", function() {
+        var id = tr.getAttribute("data-select-entity-id");
+        if (id && typeof sketchup !== "undefined" && sketchup.select_bom_entity) sketchup.select_bom_entity(id);
+      });
+    }
+
+    function renderTable(rows, tbodyId, cellFn) {
+      var tbody = document.getElementById(tbodyId);
+      var section = document.getElementById("section-with-rules");
+      tbody.innerHTML = "";
+      if (!rows || rows.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+      section.style.display = "block";
+      rows.forEach(function(r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + (cellFn(r).join("</td><td>")) + "</td>";
+        makeRowSelectable(tr, r.select_entity_id);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderTableNoRules(rows) {
+      var tbody = document.getElementById("report-body-no-rules");
+      var section = document.getElementById("section-without-rules");
+      tbody.innerHTML = "";
+      if (!rows || rows.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+      section.style.display = "block";
+      rows.forEach(function(r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + escapeHtml(r.definition_name || "") + "</td><td>" + escapeHtml(formatQuantity(r.quantity)) + "</td>";
+        makeRowSelectable(tr, r.select_entity_id);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderTableGeometryOnly(rows) {
+      var tbody = document.getElementById("report-body-geometry-only");
+      var section = document.getElementById("section-geometry-only");
+      tbody.innerHTML = "";
+      if (!rows || rows.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+      section.style.display = "block";
+      rows.forEach(function(r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + escapeHtml(r.definition_name || "") + "</td><td>" + escapeHtml(formatQuantity(r.quantity)) + "</td>";
+        makeRowSelectable(tr, r.select_entity_id);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function formatQuantity(v) {
+      if (v == null) return "";
+      if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4).replace(/\.?0+$/, "");
+      return String(v);
+    }
+
+    function escapeHtml(s) {
+      if (s == null) return "";
+      var div = document.createElement("div");
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function runExport() {
+      console.log("[BOM Export] runExport clicked, calling sketchup.run_export()");
+      document.getElementById("status").textContent = "Running export…";
+      document.getElementById("status").className = "status";
+      try {
+        sketchup.run_export();
+        console.log("[BOM Export] sketchup.run_export() returned");
+      } catch (e) {
+        console.error("[BOM Export] run_export threw", e);
+        document.getElementById("status").textContent = "Error: " + (e.message || String(e));
+        document.getElementById("status").className = "status error";
+      }
+    }
+
+    function exportCsv() {
+      if (reportRows.length === 0 && reportRowsWithoutRules.length === 0 && reportRowsGeometryOnly.length === 0) return;
+      var line = function(arr) { return arr.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(","); };
+      var csv = "";
+      if (reportRows.length > 0) {
+        var headers = ["section", "definition_name", "code", "label", "measure", "uom", "quantity", "category"];
+        csv += line(headers) + "\n";
+        reportRows.forEach(function(r) {
+          csv += line(["with_rules", r.definition_name || "", r.code || "", r.label || "", r.measure || "", r.uom || "", r.quantity != null ? r.quantity : "", r.category || ""]) + "\n";
+        });
+      }
+      if (reportRowsWithoutRules.length > 0) {
+        if (csv.length > 0) csv += "\n";
+        var headersNoRules = ["section", "definition_name", "quantity"];
+        csv += line(headersNoRules) + "\n";
+        reportRowsWithoutRules.forEach(function(r) {
+          csv += line(["without_rules", r.definition_name || "", r.quantity != null ? r.quantity : ""]) + "\n";
+        });
+      }
+      if (reportRowsGeometryOnly.length > 0) {
+        if (csv.length > 0) csv += "\n";
+        var headersGeo = ["section", "definition_name", "quantity"];
+        csv += line(headersGeo) + "\n";
+        reportRowsGeometryOnly.forEach(function(r) {
+          csv += line(["geometry_only", r.definition_name || "", r.quantity != null ? r.quantity : ""]) + "\n";
+        });
+      }
+      sketchup.save_bom_csv(csv);
+    }
+  </script>
+</body>
+</html>

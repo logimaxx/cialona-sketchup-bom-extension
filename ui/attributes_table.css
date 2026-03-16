@@ -1,0 +1,80 @@
+.attributes-table-wrap {
+  margin: 10px;
+  /* overflow-x: auto; */
+}
+
+.attributes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+input, select {
+  font-size: 10px;
+}
+
+.attributes-table th,
+.attributes-table td {
+  border: 1px solid #ccc;
+  padding: 2px 2px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.attributes-table th {
+  background: #f0f0f0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.attributes-table tbody tr:hover {
+  background: #fafafa;
+}
+
+.attributes-table .attributes-data-row--dirty td {
+  border-color: #e6a000;
+  background: #fffef5;
+}
+
+.attributes-table .catalog-search-wrap {
+  position: relative;
+  /* min-width: 120px; */
+}
+
+.attributes-table .cell-code{
+  width: 70px;
+}
+.attributes-table .cell-label {
+  width: 90px;
+  /* min-width: 80px; */
+  box-sizing: border-box;
+}
+.attributes-table .bom_measure {
+  width: 50px;
+}
+
+.attributes-table .cell-rounding-step {
+  width: 50px;
+  /* width: 70px; */
+}
+
+.attributes-table select {
+  /* min-width: 100px; */
+  /* max-width: 100%; */
+}
+
+.attributes-table .btn-delete-row {
+  padding: 4px 8px;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 4px;
+}
+
+.attributes-table .btn-delete-row:hover {
+  background: #fee;
+  border-color: #c00;
+}
+
+.attributes-table-wrap .empty-rules-placeholder {
+  margin-top: 16px;
+}

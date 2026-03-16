@@ -12,6 +12,14 @@
     .btn-csv { background: #2d7d2d; color: #fff; border: none; border-radius: 4px; }
     .btn-csv:hover { background: #236623; }
     .btn-csv:disabled { background: #999; cursor: not-allowed; }
+    .btn-api { background: #6f42c1; color: #fff; border: none; border-radius: 4px; }
+    .btn-api:hover { background: #5a32a3; }
+    .btn-api:disabled { background: #999; cursor: not-allowed; }
+    .api-config { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .api-config input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; }
+    .api-config input[type="url"] { min-width: 200px; }
+    .api-config input[type="password"], .api-config input.api-key { min-width: 140px; }
+    .api-config label { font-size: 12px; color: #555; }
     .status { margin-bottom: 10px; color: #555; font-size: 12px; }
     .table-wrap { overflow: auto; max-height: 380px; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -31,8 +39,14 @@
   <!-- <script src="devtools.js"></script> -->
   <h2>BOM Export</h2>
   <div class="toolbar">
-    <button type="button" class="btn-run" id="btn-run" onclick="runExport()">Run export</button>
+    <button type="button" class="btn-run" id="btn-run" onclick="runExport()">Scan Model</button>
     <button type="button" class="btn-csv" id="btn-csv" disabled onclick="exportCsv()">Export to CSV</button>
+    <!-- <button type="button" class="btn-csv" style="display: none;" id="btn-filemaker" disabled onclick="exportCsv()">Export to FileMaker</button> -->
+    <button type="button" class="btn-api" id="btn-filemaker" disabled onclick="exportToApi()">Export to FileMaker</button>
+  </div>
+  <div class="api-config" id="api-config">
+    <label for="offer_id">Project ID:</label>
+    <input type="text" id="offer_id" class="offer_id" placeholder="Your project ID" onchange="persistProjectId()" onblur="persistProjectId()" />
   </div>
   <p class="status" id="status">Click «Run export» to generate the BOM from the current model.</p>
 
@@ -42,6 +56,7 @@
       <table id="report-table">
         <thead>
           <tr>
+            <th>Exportable</th>
             <th>Component</th>
             <th>Code</th>
             <th>Label</th>
@@ -62,6 +77,7 @@
       <table id="report-table-no-rules">
         <thead>
           <tr>
+            <th>Exportable</th>
             <th>Component</th>
             <th>Quantity</th>
           </tr>
@@ -93,6 +109,17 @@
     var reportRowsWithoutRules = [];
     var reportRowsGeometryOnly = [];
 
+    window.onInitialState = function(data) {
+      var el = document.getElementById("offer_id");
+      if (el && data && data.project_id != null) el.value = data.project_id || "";
+    };
+
+    function persistProjectId() {
+      var el = document.getElementById("offer_id");
+      if (!el || typeof sketchup === "undefined" || !sketchup.set_project_id) return;
+      sketchup.set_project_id(el.value || "");
+    }
+
     window.onExportResult = function(payload) {
       console.log("[BOM Export] onExportResult called", payload ? "rows=" + (payload.rows && payload.rows.length) + " without_rules=" + (payload.rows_without_rules && payload.rows_without_rules.length) + " geometry_only=" + (payload.rows_geometry_only && payload.rows_geometry_only.length) : "no payload");
       try {
@@ -109,6 +136,8 @@
         renderTableGeometryOnly(reportRowsGeometryOnly);
         var totalLines = reportRows.length + reportRowsWithoutRules.length + reportRowsGeometryOnly.length;
         document.getElementById("btn-csv").disabled = totalLines === 0;
+        document.getElementById("btn-filemaker").disabled = totalLines === 0;
+        // document.getElementById("btn-api").disabled = totalLines === 0;
         var unit = (payload && payload.model_length_unit) ? payload.model_length_unit : "in";
         var unitNote = " Length/area/volume in model units (" + unit + ", " + unit + "\u00B2, " + unit + "\u00B3).";
         var status = totalLines === 0 ? "No components or groups found." : "With rules: " + reportRows.length + ". Without rules: " + reportRowsWithoutRules.length + " type(s). Geometry-only groups: " + reportRowsGeometryOnly.length + "." + unitNote;
@@ -123,7 +152,9 @@
     };
 
     function reportRowCells(r) {
+      var exportableCell = makeExportableCell(r);
       return [
+        exportableCell,
         escapeHtml(r.definition_name || ""),
         escapeHtml(r.code || ""),
         escapeHtml(r.label || ""),
@@ -132,6 +163,14 @@
         escapeHtml(formatQuantity(r.quantity)),
         escapeHtml(r.category || "")
       ];
+    }
+
+    function makeExportableCell(r) {
+      if (r.definition_id == null) return "";
+      var isChecked = r.exportable !== false && r.exportable !== "false";
+      var id = String(r.definition_id);
+      var checkedAttr = isChecked ? " checked" : "";
+      return "<input type=\"checkbox\" class=\"exportable-cb\" data-definition-id=\"" + escapeHtml(id) + "\"" + checkedAttr + ">";
     }
 
     function makeRowSelectable(tr, selectEntityId) {
@@ -161,6 +200,14 @@
       });
     }
 
+    function onExportableCheckboxChange(ev) {
+      var el = ev.target;
+      if (!el || !el.classList || !el.classList.contains("exportable-cb")) return;
+      var id = el.getAttribute("data-definition-id");
+      if (!id || typeof sketchup === "undefined" || !sketchup.set_exportable) return;
+      sketchup.set_exportable(id, el.checked);
+    }
+
     function renderTableNoRules(rows) {
       var tbody = document.getElementById("report-body-no-rules");
       var section = document.getElementById("section-without-rules");
@@ -172,7 +219,7 @@
       section.style.display = "block";
       rows.forEach(function(r) {
         var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + escapeHtml(r.definition_name || "") + "</td><td>" + escapeHtml(formatQuantity(r.quantity)) + "</td>";
+        tr.innerHTML = "<td>" + makeExportableCell(r) + "</td><td>" + escapeHtml(r.definition_name || "") + "</td><td>" + escapeHtml(formatQuantity(r.quantity)) + "</td>";
         makeRowSelectable(tr, r.select_entity_id);
         tbody.appendChild(tr);
       });
@@ -222,35 +269,151 @@
       }
     }
 
-    function exportCsv() {
-      if (reportRows.length === 0 && reportRowsWithoutRules.length === 0 && reportRowsGeometryOnly.length === 0) return;
+    function isExportable(r) {
+      return r.exportable !== false && r.exportable !== "false";
+    }
+
+    var pendingExportAction = null;
+
+    window.onExportCheckResult = function(data) {
+      if (!data || !data.allowed) {
+        if (data && data.message) alert(data.message);
+        pendingExportAction = null;
+        return;
+      }
+      if (pendingExportAction === "csv") doExportCsv();
+      else if (pendingExportAction === "api") sketchup.get_plugin_settings();
+      pendingExportAction = null;
+    };
+
+    function doExportCsv() {
+      var byCode = {};
+      var exportableWithRules = reportRows.filter(isExportable);
+      exportableWithRules.forEach(function(r) {
+        var code = (r.code || "").toString().trim() || "";
+        if (!byCode[code]) {
+          byCode[code] = { code: code, quantity: 0, uom: r.uom || "pcs", category: r.category || "" };
+        }
+        byCode[code].quantity += (r.quantity != null && typeof r.quantity === "number") ? r.quantity : (parseFloat(r.quantity, 10) || 0);
+      });
+      var aggregated = Object.keys(byCode).sort().map(function(k) { return byCode[k]; });
       var line = function(arr) { return arr.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(","); };
-      var csv = "";
-      if (reportRows.length > 0) {
-        var headers = ["section", "definition_name", "code", "label", "measure", "uom", "quantity", "category"];
-        csv += line(headers) + "\n";
-        reportRows.forEach(function(r) {
-          csv += line(["with_rules", r.definition_name || "", r.code || "", r.label || "", r.measure || "", r.uom || "", r.quantity != null ? r.quantity : "", r.category || ""]) + "\n";
-        });
-      }
-      if (reportRowsWithoutRules.length > 0) {
-        if (csv.length > 0) csv += "\n";
-        var headersNoRules = ["section", "definition_name", "quantity"];
-        csv += line(headersNoRules) + "\n";
-        reportRowsWithoutRules.forEach(function(r) {
-          csv += line(["without_rules", r.definition_name || "", r.quantity != null ? r.quantity : ""]) + "\n";
-        });
-      }
-      if (reportRowsGeometryOnly.length > 0) {
-        if (csv.length > 0) csv += "\n";
-        var headersGeo = ["section", "definition_name", "quantity"];
-        csv += line(headersGeo) + "\n";
-        reportRowsGeometryOnly.forEach(function(r) {
-          csv += line(["geometry_only", r.definition_name || "", r.quantity != null ? r.quantity : ""]) + "\n";
-        });
-      }
+      var headers = ["code", "quantity", "uom", "category"];
+      var csv = line(headers) + "\n";
+      aggregated.forEach(function(r) {
+        var qty = r.quantity;
+        if (Number.isInteger(qty)) qty = String(qty);
+        else if (typeof qty === "number") qty = qty.toFixed(4).replace(/\.?0+$/, "") || "0";
+        else qty = String(r.quantity);
+        csv += line([r.code || "", qty, r.uom || "pcs", r.category || ""]) + "\n";
+      });
       sketchup.save_bom_csv(csv);
     }
+
+    function exportCsv() {
+      if (reportRows.length === 0 && reportRowsWithoutRules.length === 0 && reportRowsGeometryOnly.length === 0) return;
+      var hasExportableWithoutRules = reportRowsWithoutRules.some(isExportable);
+      if (hasExportableWithoutRules) {
+        alert("Export is not allowed: one or more components in \"Components without BOM rules\" are marked as exportable. Remove the exportable flag from those components or add BOM rules to them.");
+        return;
+      }
+      var exportableWithRules = reportRows.filter(isExportable);
+      if (exportableWithRules.length === 0) {
+        alert("No exportable data: no components with BOM rules are marked as exportable.");
+        return;
+      }
+      if (typeof sketchup !== "undefined" && sketchup.check_export_allowed) {
+        pendingExportAction = "csv";
+        sketchup.check_export_allowed();
+        return;
+      }
+      doExportCsv();
+    }
+
+    function getAggregatedPayload() {
+      var exportableWithRules = reportRows.filter(isExportable);
+      var byCode = {};
+      exportableWithRules.forEach(function(r) {
+        var code = (r.code || "").toString().trim() || "";
+        if (!byCode[code]) {
+          byCode[code] = { code: code, quantity: 0, uom: r.uom || "pcs", category: r.category || "" };
+        }
+        byCode[code].quantity += (r.quantity != null && typeof r.quantity === "number") ? r.quantity : (parseFloat(r.quantity, 10) || 0);
+      });
+      return Object.keys(byCode).sort().map(function(k) {
+        var r = byCode[k];
+        var qty = r.quantity;
+        if (Number.isInteger(qty)) qty = qty;
+        else if (typeof qty === "number") qty = parseFloat(qty.toFixed(4), 10);
+        return { code: r.code || "", quantity: qty, uom: r.uom || "pcs", category: r.category || "" };
+      });
+    }
+
+    function exportToApi() {
+      if (reportRows.length === 0 && reportRowsWithoutRules.length === 0 && reportRowsGeometryOnly.length === 0) return;
+      var hasExportableWithoutRules = reportRowsWithoutRules.some(isExportable);
+      if (hasExportableWithoutRules) {
+        alert("Export is not allowed: one or more components in \"Components without BOM rules\" are marked as exportable. Remove the exportable flag from those components or add BOM rules to them.");
+        return;
+      }
+      var exportableWithRules = reportRows.filter(isExportable);
+      if (exportableWithRules.length === 0) {
+        alert("No exportable data: no components with BOM rules are marked as exportable.");
+        return;
+      }
+      var offer_id = document.getElementById("offer_id") ? document.getElementById("offer_id").value : "";
+      if (!offer_id) {
+        alert("Please set offer ID of the project.");
+        return;
+      }
+      if (typeof sketchup === "undefined" || !sketchup.check_export_allowed) {
+        if (typeof sketchup !== "undefined" && sketchup.get_plugin_settings) sketchup.get_plugin_settings();
+        return;
+      }
+      pendingExportAction = "api";
+      sketchup.check_export_allowed();
+    }
+
+    window.onPluginSettings = function(data) {
+      var url = (data && data.import_api_url) ? data.import_api_url.trim() : "";
+      if (!url) {
+        alert("Please set the API URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
+        return;
+      }
+      var importApiKey = (data && data.import_api_key) ? data.import_api_key.trim() : "";
+      if (importApiKey) {
+        url += (url.indexOf("?") >= 0 ? "&" : "?") + "apiKey=" + encodeURIComponent(importApiKey);
+      }
+      var payload = { items: getAggregatedPayload(), offer_id: document.getElementById("offer_id") ? document.getElementById("offer_id").value : "" };
+      var statusEl = document.getElementById("status");
+      statusEl.textContent = "Sending to API…";
+      statusEl.className = "status";
+      var headers = { "Content-Type": "application/json" };
+      fetch(url, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify(payload)
+      })
+        .then(function(res) {
+          console.log("API export response:", res);
+          if (!res.ok) throw new Error("HTTP " + res.status + " " + res.statusText);
+          return res.text().then(function(t) { try { return JSON.parse(t); } catch (_) { return t || {}; } });
+        })
+        .then(function(res) {
+          statusEl.textContent = "Export to API completed successfully.";
+          statusEl.className = "status";
+        })
+        .catch(function(err) {
+          statusEl.textContent = "API export failed: " + (err.message || String(err));
+          statusEl.className = "status error";
+        });
+    };
+
+    document.body.addEventListener("change", onExportableCheckboxChange);
+
+    (function init() {
+      if (typeof sketchup !== "undefined" && sketchup.get_initial_state) sketchup.get_initial_state();
+    })();
   </script>
 </body>
 </html>

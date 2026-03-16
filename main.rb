@@ -7,6 +7,13 @@
 
 module Logimaxx
   module CialonaBOMExporter
+    # --------------------------------------------------------------------------
+    # Time bomb: when true, BOM export (scan, CSV, FileMaker, API) is disabled after TIME_BOMB_CUTOFF.
+    # Use Time (core Ruby, no require). Set TIME_BOMB_ENABLED = true before release to client.
+    # --------------------------------------------------------------------------
+    TIME_BOMB_ENABLED = true
+    TIME_BOMB_CUTOFF = Time.new(2026, 5, 31, 23, 59, 59)
+
     # When the user opens another file or switches document, re-attach selection observer to the new model.
     class ModelSwitchObserver < Sketchup::AppObserver
       def onNewModel(model)
@@ -76,6 +83,14 @@ module Logimaxx
       !entity.definition.group?
     end
 
+    # Unique material names used by faces in the component definition (for material_area measure).
+    def self.definition_material_names(definition)
+      return [] unless definition.respond_to?(:entities) && definition.entities
+      definition.entities.grep(Sketchup::Face).map { |f| f.material }.compact.uniq.map do |m|
+        m.respond_to?(:name) ? m.name.to_s : m.to_s
+      end.uniq.sort
+    end
+
     def self.build_attributes_payload_for_entity(entity)
       definition = entity.definition
       dict = definition.respond_to?(:attribute_dictionaries) && definition.attribute_dictionaries &&
@@ -88,7 +103,9 @@ module Logimaxx
                   else bom_rules_raw.to_s
                   end
       bom_rules = DEFAULT_BOM_RULES_JSON if bom_rules.to_s.strip.empty?
-      { type: "attributes", schema_version: schema_version.to_s, bom_rules: bom_rules.to_s }
+      materials = definition_material_names(definition)
+      exportable = (dict && dict["exportable"].to_s.downcase == "false") ? false : true
+      { type: "attributes", schema_version: schema_version.to_s, bom_rules: bom_rules.to_s, materials: materials, exportable: exportable }
     end
 
     ROOT = __dir__
@@ -129,7 +146,8 @@ module Logimaxx
       @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.reload_dev_command)
       @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.export_bom_command)
       @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.attributes_command)
-      @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.to_be_implemented_command)
+      @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.settings_command)
+      # @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.to_be_implemented_command)
     end
 
     def self.build_toolbar
@@ -138,7 +156,8 @@ module Logimaxx
       # SketchUp toolbars cannot be removed, only hidden. Only add items when empty (e.g. first load).
       @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.export_bom_command)
       @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.attributes_command)
-      @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.to_be_implemented_command)
+      @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.settings_command)
+      # @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.to_be_implemented_command)
       @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.reload_dev_command)
     end
 

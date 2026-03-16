@@ -15,6 +15,7 @@ module Logimaxx
       def self.reload_dev
         return unless File.exist?(File.join(Logimaxx::CialonaBOMExporter::ROOT, "DEV"))
         Logimaxx::CialonaBOMExporter.reload!
+        ::UI.messagebox("Reload completed.")
       end
 
       def self.export_bom
@@ -23,6 +24,10 @@ module Logimaxx
 
       def self.attributes
         Logimaxx::CialonaBOMExporter::UI.show(:attributes)
+      end
+
+      def self.settings
+        Logimaxx::CialonaBOMExporter::UI.show(:settings)
       end
 
       def self.to_be_implemented
@@ -61,6 +66,17 @@ module Logimaxx
         cmd.small_icon = File.join(ROOT, "icons","attributes.png")
         cmd.large_icon = File.join(ROOT, "icons","attributes.png")
         cmd.menu_text = "Attributes"
+        cmd
+      end
+
+      def self.settings_command
+        cmd = ::UI::Command.new('Settings') do
+          Logimaxx::CialonaBOMExporter::Commands.settings
+        end
+        cmd.tooltip = 'Plugin settings (API URL, etc.)'
+        cmd.small_icon = File.join(ROOT, "icons", "setting.png")
+        cmd.large_icon = File.join(ROOT, "icons", "setting.png")
+        cmd.menu_text = "Settings"
         cmd
       end
 

@@ -4,11 +4,6 @@
   <meta charset="utf-8">
   <link rel="stylesheet" href="attributes.css">
   <title>BOM ruleset editor</title>
-  <style>
-    #attributes-container {
-      /* display: none; */
-    }
-  </style>
 </head>
 <body>
   <div id="empty-selection-message" class="empty-selection-message">
@@ -18,9 +13,20 @@
     <button type="button" id="btn-add-item" class="btn-add-item" onclick="addItem()">➕ Add rule</button>
     <button type="button" id="btn-save" class="btn-save hidden" onclick="saveAttributes()">💾 Save</button>
   </div>
+  <div id="exportable-wrap" class="exportable-wrap hidden" aria-hidden="true">
+    <label class="exportable-label">
+      <input type="checkbox" id="exportable-flag" checked>
+      <span>Exportable</span>
+    </label>
+  </div>
   <template id="attributes-template">
-    <form>
-      <fieldset>
+    <div class="attributes-block collapsed">
+      <div class="attributes-block-header" role="button" tabindex="0">
+        <span class="attributes-block-summary">— / — / —</span>
+        <span class="attributes-block-toggle" aria-hidden="true">▼</span>
+      </div>
+      <form>
+        <fieldset>
         <input type="hidden" name="ruleset_idx" value="0">
         <input type="hidden" name="bom_category" value="">
         <!-- <legend>BOM ruleset</legend> -->
@@ -28,28 +34,13 @@
           <span>Code</span>
           <div class="catalog-search-wrap">
             <input type="text" name="bom" style="width: 100%;" autocomplete="off"
-              onkeyup="searchCatalog(this)" onfocus="searchCatalog(this)" onblur="hideCatalogDropdown()">
+              onkeyup="searchCatalogViaApi(this)" onfocus="searchCatalogViaApi(this)" onblur="hideCatalogDropdown(); validateCodeOnBlur(this);">
             <ul id="catalog-dropdown" class="catalog-dropdown" style="display: none;"></ul>
           </div>
         </label>
         <label>
           <span>Label</span>
           <input type="text" name="bom_label" style="width: 70px;">
-        </label>
-        <label>
-          <span>Measurement</span>
-          <select name="bom_measure">
-            <option value="count">Select measure</option>
-            <option value="count">Count</option>
-            <option value="top_area">Top area</option>
-            <option value="total_area">Total area</option>
-            <option value="material_area">Material area</option>
-            <option value="top_perimeter">Top perimeter</option>
-            <!-- <option value="edge_length">Edge length</option> -->
-            <option value="smart_length">Length</option>
-            <option value="bbox_volume">Bounding box volume</option>
-            <option value="bbox_dimensions">Bounding box dimensions</option>
-          </select>
         </label>
         <label>
           <span>Unit of measure</span>
@@ -60,6 +51,28 @@
             <option value="custom">custom</option>
           </select>
         </label>
+        <label>
+          <span>Measurement</span>
+          <select name="bom_measure">
+            <option value="">Select measure</option>
+            <option value="count">Count</option>
+            <option value="top_area">Top area</option>
+            <option value="total_area">Total area</option>
+            <option value="material_area">Material area</option>
+            <option value="top_perimeter">Top perimeter</option>
+            <!-- <option value="edge_length">Edge length</option> -->
+            <option value="smart_length">Length</option>
+            <option value="bbox_volume">BBox volume</option>
+            <option value="bbox_dimensions">BBox dimensions</option>
+          </select>
+        </label>
+        <label class="measure-param measure-param--material" style="display: none;">
+          <span>Material</span>
+          <select name="bom_param_material">
+            <option value="">Select material</option>
+          </select>
+        </label>
+        
         <label>
           <span>Rounding mode</span>
           <select name="bom_rounding_mode">
@@ -74,9 +87,10 @@
           <input type="number" name="bom_rounding_step" style="width: 70px;" value="0.01">
         </label>
         
-        <button type="button" class="btn-delete-item" onclick="setDirty(this.form); var c=document.getElementById('attributes-container'); $(this.form).remove(); if(c&&c.querySelectorAll('form').length===0) ensureEmptyRulesPlaceholder(c);">❌ Delete</button>
+        <button type="button" class="btn-delete-item" onclick="var f=this.form; var b=f.closest('.attributes-block'); setDirty(f); if(b) b.remove(); var c=document.getElementById('attributes-container'); if(c&&c.querySelectorAll('form').length===0) ensureEmptyRulesPlaceholder(c); scheduleAutoSave();">❌ Delete</button>
       </fieldset>
-    </form>
+      </form>
+    </div>
   </template>
   <div id="attributes-container">
     

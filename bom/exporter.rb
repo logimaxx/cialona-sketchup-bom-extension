@@ -109,6 +109,14 @@ module Logimaxx
           rules.is_a?(Array) ? rules : []
         end
 
+        # True unless dict["exportable"] == "false". Default is exportable.
+        def exportable_for_definition(definition)
+          dict = definition.respond_to?(:attribute_dictionaries) && definition.attribute_dictionaries &&
+                 definition.attribute_dictionary(BOM_RULES_DICT)
+          return true unless dict
+          dict["exportable"].to_s.downcase != "false"
+        end
+
         # Build report: { rows: [...], rows_without_rules: [...], rows_geometry_only: [...] }.
         # rows = components that have bom_rules (one row per rule).
         # rows_without_rules = components with no bom_rules, one row per definition, count only.
@@ -153,7 +161,8 @@ module Logimaxx
             uom: "pcs",
             quantity: count.to_f,
             category: "",
-            section: "without_rules"
+            section: "without_rules",
+            exportable: exportable_for_definition(definition)
           }
         end
 
@@ -185,7 +194,8 @@ module Logimaxx
             uom: (rule["uom"] || rule[:uom]).to_s,
             quantity: quantity,
             category: (rule["category"] || rule[:category]).to_s,
-            section: "with_rules"
+            section: "with_rules",
+            exportable: exportable_for_definition(definition)
           }
         end
 
@@ -352,9 +362,23 @@ module Logimaxx
           total * area_unit_factor
         end
 
+        # Area of faces that have the selected material (rule["params"]["material"] = material name).
         def compute_material_area(instances, rule)
-          # Stub: would filter by material from rule["params"]["material"]
-          compute_total_area(instances)
+          material_name = (rule["params"] || rule[:params]) && ((rule["params"] || rule[:params])["material"] || (rule["params"] || rule[:params])[:material])
+          material_name = material_name.to_s.strip
+          return 0.0 if material_name.empty?
+
+          total = 0.0
+          instances.each do |inst|
+            tr = inst.transformation
+            scale = scale_from_transformation(tr)
+            inst.definition.entities.grep(Sketchup::Face).each do |face|
+              next unless face.material
+              next unless face.material.name.to_s == material_name
+              total += face.area * scale * scale
+            end
+          end
+          total * area_unit_factor
         end
 
         # Top boundary perimeter = length of edges that belong to exactly one top face (contour at max Z).

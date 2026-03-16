@@ -23,14 +23,38 @@ module Logimaxx
           File.join(UI::UI_DIR, 'attributes.html')
         end
 
+        # Unique key so SketchUp saves/restores position and size in the tray.
+        PREFERENCES_KEY = "Logimaxx_CialonaBOMExporter_Attributes".freeze
+
+        # Show this dialog in the right-side inspector tray (Windows Tray) instead of a floating window.
+        USE_INSPECTOR = false
+
         def self.opts
-          { width: 720, height: 520, title: 'Cialona BOM — Attribute editor' }
+          {
+            width: 720,
+            height: 520,
+            title: 'Cialona BOM — Attribute editor',
+            preferences_key: PREFERENCES_KEY,
+            style: ::UI::HtmlDialog::STYLE_DIALOG  # Required for Tray / show_inspector
+          }
         end
 
         def self.register(dialog)
           dialog.add_action_callback('ready') { |*_| on_ready }
           dialog.add_action_callback('test') { |*_| on_test }
           dialog.add_action_callback('save_attributes') { |_ctx, json| on_save_attributes(json) }
+          dialog.add_action_callback('get_catalog_settings') { |*_| on_get_catalog_settings(dialog) }
+        end
+
+        def self.on_get_catalog_settings(dialog)
+          catalog_api_url = Logimaxx::CialonaBOMExporter::UI::Settings.stored_catalog_api_url
+          catalog_api_key = Logimaxx::CialonaBOMExporter::UI::Settings.stored_catalog_api_key
+          catalog_validate_codes = Logimaxx::CialonaBOMExporter::UI::Settings.stored_catalog_validate_codes
+          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onCatalogSettings", {
+            catalog_api_url: catalog_api_url,
+            catalog_api_key: catalog_api_key,
+            catalog_validate_codes: catalog_validate_codes
+          })
         end
 
         def self.on_ready
@@ -54,6 +78,7 @@ module Logimaxx
           schema_version = (payload["schema_version"] || "1.0").to_s
           bom_rules = payload["bom_rules"]
           bom_rules = bom_rules.is_a?(String) ? bom_rules : JSON.generate(bom_rules)
+          exportable = (payload["exportable"] == true || payload["exportable"].to_s.downcase == "true")
 
           model = Sketchup.active_model
           return ::UI.messagebox("No active model.") unless model
@@ -69,13 +94,14 @@ module Logimaxx
           dict = definition.attribute_dictionary(BOM_RULES_DICT, true)
           dict["schema_version"] = schema_version
           dict["bom_rules"] = bom_rules
+          dict["exportable"] = exportable ? "true" : "false"
 
           category = last_ruleset_category(bom_rules)
           if category && category.to_s.strip != ""
             tag = model.layers[category] || model.layers.add(category)
             entity.layer = tag
           end
-          ::UI.messagebox("Attributes saved.")
+          # ::UI.messagebox("Attributes saved.")
         end
 
         def self.last_ruleset_category(bom_rules_json)

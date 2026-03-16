@@ -11,6 +11,7 @@ module Logimaxx
       ui.rb
       ui/attributes.rb
       ui/bom_exporter.rb
+      ui/settings.rb
       catalog/provider.rb
       catalog/csv_provider.rb
       dev.rb
@@ -27,12 +28,18 @@ module Logimaxx
         $LOADED_FEATURES.delete(full)
         $LOADED_FEATURES.delete(File.expand_path(full))
       end
-      # 3. Re-load in order. Use load() so each file runs again (require would skip).
-      RELOAD_FILES.each do |rel|
-        path = File.join(root, rel)
-        load path if File.exist?(path)
+      # 3. Re-load in order. Suppress "already initialized constant" warnings during reload.
+      old_verbose = $VERBOSE
+      $VERBOSE = nil
+      begin
+        RELOAD_FILES.each do |rel|
+          path = File.join(root, rel)
+          load path if File.exist?(path)
+        end
+        puts '[Cialona BOM Exporter] Reloaded.'
+      ensure
+        $VERBOSE = old_verbose
       end
-      puts '[Cialona BOM Exporter] Reloaded.'
       nil
     end
   end

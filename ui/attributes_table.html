@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="attributes.css">
+  <link rel="stylesheet" href="attributes_table.css">
+  <title>BOM ruleset editor (table)</title>
+</head>
+<body>
+  <div id="empty-selection-message" class="empty-selection-message">
+    Nothing selected
+  </div>
+  <div id="toolbar-actions" class="toolbar-actions hidden" aria-hidden="true">
+    <button type="button" id="btn-add-item" class="btn-add-item" onclick="addRow()">➕ Add rule</button>
+    <button type="button" id="btn-save" class="btn-save hidden" onclick="saveAttributes()">💾 Save</button>
+  </div>
+  <template id="row-template">
+    <tr class="attributes-data-row">
+      <td>
+        <div class="catalog-search-wrap">
+          <input type="text" name="bom" class="cell-code" autocomplete="off"
+            onkeyup="searchCatalogViaApi(this)" onfocus="searchCatalogViaApi(this)" onblur="hideCatalogDropdown(); validateCodeOnBlur(this);">
+          <ul class="catalog-dropdown" style="display: none;"></ul>
+        </div>
+      </td>
+      <td><input type="text" name="bom_label" class="cell-label"></td>
+      <td>
+        <select name="bom_measure">
+          <option value="">Select measure</option>
+          <option value="count">Count</option>
+          <option value="top_area">Top area</option>
+          <option value="total_area">Total area</option>
+          <option value="material_area">Material area</option>
+          <option value="top_perimeter">Top perimeter</option>
+          <option value="smart_length">Length</option>
+          <option value="bbox_volume">BBox volume</option>
+          <option value="bbox_dimensions">BBox dimensions</option>
+        </select>
+      </td>
+      <td>
+        <select name="bom_param_material" class="cell-material" title="For Material area">
+          <option value="">—</option>
+        </select>
+      </td>
+      <td>
+        <select name="bom_uom">
+          <option value="pcs">pcs</option>
+          <option value="m2">m2</option>
+          <option value="mtr">mtr</option>
+          <option value="custom">custom</option>
+        </select>
+      </td>
+      <td>
+        <select name="bom_rounding_mode">
+          <option value="none">None</option>
+          <option value="ceil">Ceil</option>
+          <option value="floor">Floor</option>
+          <option value="round">Round</option>
+        </select>
+      </td>
+      <td><input type="number" name="bom_rounding_step" class="cell-rounding-step" value="0.01"></td>
+      <td>
+        <input type="hidden" name="bom_category" value="">
+        <button type="button" class="btn-delete-row" onclick="deleteRow(this)">❌</button>
+      </td>
+    </tr>
+  </template>
+  <div id="attributes-table-wrap" class="attributes-table-wrap hidden">
+    <table class="attributes-table">
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Label</th>
+          <th>Measurement</th>
+          <th>Material</th>
+          <th width="50">UOM</th>
+          <th width="50">Rounding</th>
+          <th width="50">Step</th>
+          <th ></th>
+        </tr>
+      </thead>
+      <tbody id="attributes-tbody">
+      </tbody>
+    </table>
+    <div id="empty-rules-placeholder" class="empty-rules-placeholder" style="display: none;">
+      No rules yet. Click «Add rule» above to create one.
+    </div>
+  </div>
+  <script src="jquery.js"></script>
+  <script src="csv.js"></script>
+  <script src="catalog_search.js"></script>
+  <script src="attributes_table.js"></script>
+</body>
+</html>

@@ -12,10 +12,12 @@ module Logimaxx
 
       require_relative 'ui/attributes'
       require_relative 'ui/bom_exporter'
+      require_relative 'ui/settings'
 
       DIALOG_MODULES = {
         attributes: Attributes,
-        export_bom: BOMExporter
+        export_bom: BOMExporter,
+        settings: Settings
       }.freeze
 
       def self.show(dialog_id)
@@ -34,12 +36,18 @@ module Logimaxx
         dialog.set_file(path)
         mod.register(dialog)
         dialog.show
-        dialog.center
+        dialog.center unless opts[:preferences_key]
 
         ns.dialogs[dialog_id] = dialog
       end
 
-      # Inject JSON via Base64 to avoid escaping issues with quotes/backslashes in payload.
+      # Inject JSON via Base64 into the dialog: runs JS that calls window[js_callback_name](data).
+      # Callers (so you can find who triggers which callback):
+      #   onSettingsLoaded  -> ui/settings.rb (on_get_settings)
+      #   onSettingsSaved   -> ui/settings.rb (on_save_settings)
+      #   onCatalogSettings -> ui/attributes.rb (on_get_catalog_settings)
+      #   onSketchUpSelection -> main.rb, ui/attributes.rb
+      #   onExportCheckResult, onInitialState, onPluginSettings, onExportResult -> ui/bom_exporter.rb
       def self.inject_json(dialog, js_callback_name, data)
         require "base64"
         json = data.to_json

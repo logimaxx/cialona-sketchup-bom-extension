@@ -15,7 +15,13 @@
     .btn-api { background: #6f42c1; color: #fff; border: none; border-radius: 4px; }
     .btn-api:hover { background: #5a32a3; }
     .btn-api:disabled { background: #999; cursor: not-allowed; }
-    .api-config { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .btn-offer { background: #5a6b7a; color: #fff; border: none; border-radius: 4px; }
+    .btn-offer:hover { background: #4a5a68; }
+    .btn-offer:disabled { background: #999; cursor: not-allowed; }
+    .input-group { display: inline-flex; align-items: stretch; }
+    .input-group .offer_id { border-right: none; border-radius: 4px 0 0 4px; }
+    .input-group .btn-offer { border-radius: 0 4px 4px 0; border-left: none; }
+    .api-config { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .api-config input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; }
     .api-config input[type="url"] { min-width: 200px; }
     .api-config input[type="password"], .api-config input.api-key { min-width: 140px; }
@@ -28,10 +34,14 @@
     tr:hover { background: #f5f5f5; }
     tr.bom-selectable { cursor: pointer; }
     tr.bom-selectable:hover { background: #e3f2fd; }
+    tr.offer-only-row td { background: #fff8e1; color: #6b4f00; }
+    .qty-export-input { width: 110px; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px; }
     .empty { color: #888; padding: 24px; text-align: center; }
     .error { color: #b00; }
     .section-title { font-size: 13px; margin: 16px 0 8px; color: #333; }
     #section-without-rules .table-wrap { max-height: 220px; }
+    th.exportable-th { text-align: center; width: 1%; white-space: nowrap; }
+    th.exportable-th .exportable-toggle-all { vertical-align: middle; cursor: pointer; }
   </style>
   <title>Cialona BOM — Export 1</title>
 </head>
@@ -40,13 +50,16 @@
   <h2>BOM Export</h2>
   <div class="toolbar">
     <button type="button" class="btn-run" id="btn-run" onclick="runExport()">Scan Model</button>
-    <button type="button" class="btn-csv" id="btn-csv" disabled onclick="exportCsv()">Export to CSV</button>
+    <div class="api-config" id="offer-controls" style="display: none;">
+      <div class="input-group">
+        <input type="text" id="offer_id" class="offer_id" placeholder="Your project ID" oninput="onOfferIdInput()" onblur="persistProjectId()" />
+        <button type="button" class="btn-offer" id="btn-load-offer-lines" disabled onclick="loadOfferLines()" style="display: none;">Load offer</button>
+      </div>
+    </div>
+
+    <button type="button" class="btn-csv" id="btn-csv" disabled onclick="exportCsv()" style="display: none;">Export to CSV</button>
     <!-- <button type="button" class="btn-csv" style="display: none;" id="btn-filemaker" disabled onclick="exportCsv()">Export to FileMaker</button> -->
-    <button type="button" class="btn-api" id="btn-filemaker" disabled onclick="exportToApi()">Export to FileMaker</button>
-  </div>
-  <div class="api-config" id="api-config">
-    <label for="offer_id">Project ID:</label>
-    <input type="text" id="offer_id" class="offer_id" placeholder="Your project ID" onchange="persistProjectId()" onblur="persistProjectId()" />
+    <button type="button" class="btn-api" id="btn-filemaker" disabled onclick="exportToApi()" style="display: none;">Export to FileMaker</button>
   </div>
   <p class="status" id="status">Click «Run export» to generate the BOM from the current model.</p>
 
@@ -56,14 +69,15 @@
       <table id="report-table">
         <thead>
           <tr>
-            <th>Exportable</th>
+            <th class="exportable-th" title="Toggle all exportable flags in this list">
+              <input type="checkbox" id="toggle-all-exportable-with-rules" class="exportable-toggle-all" data-table-id="report-table" onclick="event.stopPropagation()" />
+            </th>
             <th>Component</th>
-            <th>Code</th>
-            <th>Label</th>
+            <th>Code / Label</th>
             <th>Measure</th>
-            <th>UOM</th>
             <th>Quantity</th>
-            <th>Category</th>
+            <th>In offer</th>
+            <th>Qty to export</th>
           </tr>
         </thead>
         <tbody id="report-body"></tbody>
@@ -77,7 +91,9 @@
       <table id="report-table-no-rules">
         <thead>
           <tr>
-            <th>Exportable</th>
+            <th class="exportable-th" title="Toggle all exportable flags in this list">
+              <input type="checkbox" id="toggle-all-exportable-no-rules" class="exportable-toggle-all" data-table-id="report-table-no-rules" onclick="event.stopPropagation()" />
+            </th>
             <th>Component</th>
             <th>Quantity</th>
           </tr>
@@ -109,15 +125,135 @@
     var reportRowsWithoutRules = [];
     var reportRowsGeometryOnly = [];
 
+    var offerLinesCache = null;
+    var pendingPluginSettingsUse = "import";
+    var exportQtyOverridesByKey = {};
+    var scanDone = false;
+
     window.onInitialState = function(data) {
       var el = document.getElementById("offer_id");
       if (el && data && data.project_id != null) el.value = data.project_id || "";
+      updateLoadOfferButtonEnabled();
     };
 
     function persistProjectId() {
       var el = document.getElementById("offer_id");
       if (!el || typeof sketchup === "undefined" || !sketchup.set_project_id) return;
       sketchup.set_project_id(el.value || "");
+    }
+
+    function updateLoadOfferButtonEnabled() {
+      var btn = document.getElementById("btn-load-offer-lines");
+      var el = document.getElementById("offer_id");
+      if (!btn) return;
+      btn.disabled = !scanDone || !el || el.value.trim() === "";
+    }
+
+    function onOfferIdInput() {
+      var el = document.getElementById("offer_id");
+      var oid = el ? el.value.trim() : "";
+      if (offerLinesCache && offerLinesCache.offerId !== oid) {
+        clearOfferLinesCache();
+        exportQtyOverridesByKey = {};
+        rerenderReportTableWithRules();
+      }
+      updateLoadOfferButtonEnabled();
+      updateFileMakerEnabled();
+      syncActionButtons();
+    }
+
+    function clearOfferLinesCache() {
+      offerLinesCache = null;
+    }
+
+    function rerenderReportTableWithRules() {
+      renderTable(reportRows, "report-body", reportRowCells);
+    }
+
+    function currentOfferId() {
+      var el = document.getElementById("offer_id");
+      return el ? el.value.trim() : "";
+    }
+
+    function updateFileMakerEnabled() {
+      var offerId = currentOfferId();
+      var hasOfferLoaded = !!(offerLinesCache && offerLinesCache.offerId === offerId && offerLinesCache.idsByKey);
+      var totalLines = (reportRows ? reportRows.length : 0) +
+        (reportRowsWithoutRules ? reportRowsWithoutRules.length : 0) +
+        (reportRowsGeometryOnly ? reportRowsGeometryOnly.length : 0);
+      var btn = document.getElementById("btn-filemaker");
+      if (!btn) return;
+      btn.disabled = totalLines === 0 || !hasOfferLoaded;
+    }
+
+    function setButtonVisibility(buttonId, visible) {
+      var el = document.getElementById(buttonId);
+      if (!el) return;
+      el.style.display = visible ? "" : "none";
+    }
+
+    function syncActionButtons() {
+      var offerId = currentOfferId();
+      var hasOfferLoaded = !!(offerLinesCache && offerLinesCache.offerId === offerId && offerLinesCache.idsByKey);
+      var totalLines = (reportRows ? reportRows.length : 0) +
+        (reportRowsWithoutRules ? reportRowsWithoutRules.length : 0) +
+        (reportRowsGeometryOnly ? reportRowsGeometryOnly.length : 0);
+
+      // Project ID input should appear only after scan completed.
+      setButtonVisibility("offer-controls", !!scanDone);
+
+      // Show Load offer lines only after scan completed.
+      setButtonVisibility("btn-load-offer-lines", !!scanDone);
+      updateLoadOfferButtonEnabled();
+
+      // Show export buttons only after offer lines are loaded (and there are scan results).
+      var showScanResults = !!scanDone && totalLines > 0;
+      var showCsv = showScanResults;
+      var showFileMaker = showScanResults && hasOfferLoaded;
+
+      setButtonVisibility("btn-csv", showCsv);
+      setButtonVisibility("btn-filemaker", showFileMaker);
+
+      var btnCsv = document.getElementById("btn-csv");
+      if (btnCsv) btnCsv.disabled = !showCsv;
+
+      // FileMaker enable/disable depends on offer lines + quantities.
+      updateFileMakerEnabled();
+    }
+
+    function getOfferOnlyRows(baseRows) {
+      if (!scanDone) return [];
+      if (!offerLinesCache || !offerLinesCache.qtyByKey) return [];
+      var existingKeys = {};
+      (baseRows || []).forEach(function(r) {
+        existingKeys[makeLineKey({ code: r.code, uom: r.uom, category: r.category })] = true;
+      });
+      var rows = [];
+      Object.keys(offerLinesCache.qtyByKey).forEach(function(key) {
+        if (existingKeys[key]) return;
+        var parts = key.split("|");
+        rows.push({
+          _offerOnly: true,
+          definition_id: null,
+          definition_name: "(offer only)",
+          code: parts[0] || "",
+          label: "",
+          measure: "",
+          uom: parts[1] || "",
+          quantity: "\u2014",
+          category: parts[2] || "",
+          offer_quantity: offerLinesCache.qtyByKey[key],
+          select_entity_id: null
+        });
+      });
+      rows.sort(function(a, b) {
+        var ak = (a.code + "|" + a.uom + "|" + a.category);
+        var bk = (b.code + "|" + b.uom + "|" + b.category);
+        if (ak < bk) return -1;
+        if (ak > bk) return 1;
+        return 0;
+      });
+      return rows;
     }
 
     window.onExportResult = function(payload) {
@@ -128,6 +264,7 @@
           document.getElementById("status").className = "status error";
           return;
         }
+        scanDone = true;
         reportRows = (payload && payload.rows) ? payload.rows : [];
         reportRowsWithoutRules = (payload && payload.rows_without_rules) ? payload.rows_without_rules : [];
         reportRowsGeometryOnly = (payload && payload.rows_geometry_only) ? payload.rows_geometry_only : [];
@@ -135,8 +272,7 @@
         renderTableNoRules(reportRowsWithoutRules);
         renderTableGeometryOnly(reportRowsGeometryOnly);
         var totalLines = reportRows.length + reportRowsWithoutRules.length + reportRowsGeometryOnly.length;
-        document.getElementById("btn-csv").disabled = totalLines === 0;
-        document.getElementById("btn-filemaker").disabled = totalLines === 0;
+        syncActionButtons();
         // document.getElementById("btn-api").disabled = totalLines === 0;
         var unit = (payload && payload.model_length_unit) ? payload.model_length_unit : "in";
         var unitNote = " Length/area/volume in model units (" + unit + ", " + unit + "\u00B2, " + unit + "\u00B3).";
@@ -151,17 +287,83 @@
       }
     };
 
+    function offerQtyDisplayForRow(r) {
+      var uom = r && r.uom ? r.uom : "";
+      if (r && r._offerOnly) {
+        var q = formatQuantity(r.offer_quantity);
+        return uom ? (q + " " + uom) : q;
+      }
+      if (!offerLinesCache || !offerLinesCache.qtyByKey) return "\u2014";
+      var key = makeLineKey({ code: r.code, uom: r.uom, category: r.category });
+      if (!key) return "\u2014";
+      var q = offerLinesCache.qtyByKey[key];
+      if (q == null) return "\u2014";
+      var qTxt = formatQuantity(q);
+      return uom ? (qTxt + " " + uom) : qTxt;
+    }
+
+    function codeLabelDisplayForRow(r) {
+      var code = escapeHtml(r.code || "");
+      var label = (r.label || "").toString().trim();
+      if (!label) return code;
+      return code + "<br>(" + escapeHtml(label) + ")";
+    }
+
+    function quantityQtyUomDisplayForRow(r) {
+      if (r && r._offerOnly) return "\u2014";
+      var q = formatQuantity(r.quantity);
+      var uom = (r.uom || "").toString().trim();
+      if (!uom) return q;
+      return q + " " + uom;
+    }
+
+    function parseExportQtyLoose(v) {
+      if (v == null) return null;
+      if (typeof v === "number") return isNaN(v) ? null : v;
+      var s = String(v).trim();
+      if (!s) return null;
+      s = s.replace(",", ".");
+      var n = parseFloat(s, 10);
+      return isNaN(n) ? null : n;
+    }
+
+    function getExportLineKey(r) {
+      if (!r) return "";
+      return makeLineKey({ code: r.code, uom: r.uom, category: r.category });
+    }
+
+    function exportQtyDefaultForRow(r) {
+      if (!r) return null;
+      if (r._offerOnly) return r.offer_quantity;
+      return r.quantity;
+    }
+
+    function onExportQtyInput(ev) {
+      var el = ev && ev.target ? ev.target : null;
+      if (!el) return;
+      var key = el.getAttribute("data-export-key");
+      if (!key) return;
+      var n = parseExportQtyLoose(el.value);
+      if (n == null) delete exportQtyOverridesByKey[key];
+      else exportQtyOverridesByKey[key] = n;
+    }
+
     function reportRowCells(r) {
       var exportableCell = makeExportableCell(r);
+      var exportKey = getExportLineKey(r);
+      var defaultQty = exportQtyDefaultForRow(r);
+      var overrideQty = exportQtyOverridesByKey[exportKey];
+      var qtyToExport = overrideQty != null ? overrideQty : defaultQty;
+      if (qtyToExport == null || qtyToExport === "\u2014") qtyToExport = "";
       return [
         exportableCell,
         escapeHtml(r.definition_name || ""),
-        escapeHtml(r.code || ""),
-        escapeHtml(r.label || ""),
+        codeLabelDisplayForRow(r),
         escapeHtml(r.measure || ""),
-        escapeHtml(r.uom || ""),
-        escapeHtml(formatQuantity(r.quantity)),
-        escapeHtml(r.category || "")
+        escapeHtml(quantityQtyUomDisplayForRow(r)),
+        escapeHtml(offerQtyDisplayForRow(r)),
+        "<input class=\"qty-export-input\" type=\"text\" data-export-key=\"" + escapeHtml(exportKey) + "\" " +
+          "value=\"" + escapeHtml(String(qtyToExport)) + "\" onclick=\"event.stopPropagation();\" oninput=\"onExportQtyInput(event)\" />"
       ];
     }
 
@@ -186,18 +388,23 @@
     function renderTable(rows, tbodyId, cellFn) {
       var tbody = document.getElementById(tbodyId);
       var section = document.getElementById("section-with-rules");
+      var displayRows = rows || [];
+      if (tbodyId === "report-body") displayRows = displayRows.concat(getOfferOnlyRows(displayRows));
       tbody.innerHTML = "";
-      if (!rows || rows.length === 0) {
+      if (!displayRows || displayRows.length === 0) {
         section.style.display = "none";
+        syncExportableToggleForTable("report-table", "toggle-all-exportable-with-rules");
         return;
       }
       section.style.display = "block";
-      rows.forEach(function(r) {
+      displayRows.forEach(function(r) {
         var tr = document.createElement("tr");
         tr.innerHTML = "<td>" + (cellFn(r).join("</td><td>")) + "</td>";
+        if (r._offerOnly) tr.classList.add("offer-only-row");
         makeRowSelectable(tr, r.select_entity_id);
         tbody.appendChild(tr);
       });
+      syncExportableToggleForTable("report-table", "toggle-all-exportable-with-rules");
     }
 
     function onExportableCheckboxChange(ev) {
@@ -208,12 +415,51 @@
       sketchup.set_exportable(id, el.checked);
     }
 
+    function syncExportableToggleForTable(tableId, toggleId) {
+      var table = document.getElementById(tableId);
+      var toggle = document.getElementById(toggleId);
+      if (!table || !toggle) return;
+      var cbs = table.querySelectorAll("tbody .exportable-cb");
+      var n = cbs.length;
+      if (n === 0) {
+        toggle.checked = false;
+        toggle.indeterminate = false;
+        toggle.disabled = true;
+        return;
+      }
+      toggle.disabled = false;
+      var checked = 0;
+      for (var i = 0; i < n; i++) {
+        if (cbs[i].checked) checked++;
+      }
+      toggle.indeterminate = checked > 0 && checked < n;
+      toggle.checked = checked === n;
+    }
+
+    function onExportableToggleAllChange(ev) {
+      var el = ev.target;
+      if (!el || !el.classList || !el.classList.contains("exportable-toggle-all")) return;
+      var tableId = el.getAttribute("data-table-id");
+      if (!tableId || typeof sketchup === "undefined" || !sketchup.set_exportable_bulk) return;
+      var table = document.getElementById(tableId);
+      if (!table) return;
+      var cbs = table.querySelectorAll("tbody .exportable-cb");
+      var ids = [];
+      for (var i = 0; i < cbs.length; i++) {
+        var id = cbs[i].getAttribute("data-definition-id");
+        if (id) ids.push(id);
+      }
+      if (ids.length === 0) return;
+      sketchup.set_exportable_bulk(JSON.stringify(ids), el.checked);
+    }
+
     function renderTableNoRules(rows) {
       var tbody = document.getElementById("report-body-no-rules");
       var section = document.getElementById("section-without-rules");
       tbody.innerHTML = "";
       if (!rows || rows.length === 0) {
         section.style.display = "none";
+        syncExportableToggleForTable("report-table-no-rules", "toggle-all-exportable-no-rules");
         return;
       }
       section.style.display = "block";
@@ -223,6 +469,7 @@
         makeRowSelectable(tr, r.select_entity_id);
         tbody.appendChild(tr);
       });
+      syncExportableToggleForTable("report-table-no-rules", "toggle-all-exportable-no-rules");
     }
 
     function renderTableGeometryOnly(rows) {
@@ -259,6 +506,20 @@
       console.log("[BOM Export] runExport clicked, calling sketchup.run_export()");
       document.getElementById("status").textContent = "Running export…";
       document.getElementById("status").className = "status";
+      scanDone = false;
+      updateLoadOfferButtonEnabled();
+      syncActionButtons();
+      // Reset table/input state on each scan so previous edits/offers aren't mixed in.
+      offerLinesCache = null; // Force user to reload offer lines after each scan (avoid stale updates).
+      reportRows = [];
+      reportRowsWithoutRules = [];
+      reportRowsGeometryOnly = [];
+      exportQtyOverridesByKey = {};
+      renderTable([], "report-body", reportRowCells);
+      renderTableNoRules([]);
+      renderTableGeometryOnly([]);
+      document.getElementById("btn-csv").disabled = true;
+      document.getElementById("btn-filemaker").disabled = true;
       try {
         sketchup.run_export();
         console.log("[BOM Export] sketchup.run_export() returned");
@@ -331,22 +592,236 @@
     }
 
     function getAggregatedPayload() {
+      // One FileMaker "line" is uniquely identified by (code, uom, category).
       var exportableWithRules = reportRows.filter(isExportable);
-      var byCode = {};
-      exportableWithRules.forEach(function(r) {
-        var code = (r.code || "").toString().trim() || "";
-        if (!byCode[code]) {
-          byCode[code] = { code: code, quantity: 0, uom: r.uom || "pcs", category: r.category || "" };
+      var defaultsByKey = {};
+      var modelKeysAll = {};
+
+      function addDefaultLine(r) {
+        var key = makeLineKey({ code: r.code, uom: r.uom, category: r.category });
+        if (!key) return;
+        if (!defaultsByKey[key]) {
+          defaultsByKey[key] = {
+            code: (r.code || "").toString().trim() || "",
+            uom: (r.uom || "pcs").toString().trim(),
+            category: (r.category || "").toString().trim(),
+            quantity: 0
+          };
         }
-        byCode[code].quantity += (r.quantity != null && typeof r.quantity === "number") ? r.quantity : (parseFloat(r.quantity, 10) || 0);
+        var n = parseExportQtyLoose(r.quantity);
+        defaultsByKey[key].quantity += (n == null ? 0 : n);
+      }
+
+      exportableWithRules.forEach(function(r) {
+        addDefaultLine(r);
       });
-      return Object.keys(byCode).sort().map(function(k) {
-        var r = byCode[k];
-        var qty = r.quantity;
+
+      // Also export "offer-only" lines (present in the offer but not in the current model export).
+      if (offerLinesCache && offerLinesCache.qtyByKey) {
+        (reportRows || []).forEach(function(r) {
+          var k = makeLineKey({ code: r.code, uom: r.uom, category: r.category });
+          if (k) modelKeysAll[k] = true;
+        });
+        Object.keys(offerLinesCache.qtyByKey).forEach(function(key) {
+          if (modelKeysAll[key]) return;
+          var parts = key.split("|");
+          defaultsByKey[key] = {
+            code: parts[0] || "",
+            uom: parts[1] || "pcs",
+            category: parts[2] || "",
+            quantity: offerLinesCache.qtyByKey[key] || 0
+          };
+        });
+      }
+
+      return Object.keys(defaultsByKey).sort().map(function(key) {
+        var r = defaultsByKey[key];
+        var override = exportQtyOverridesByKey[key];
+        var qty = override != null ? override : r.quantity;
+        if (qty == null || isNaN(qty)) qty = 0;
         if (Number.isInteger(qty)) qty = qty;
-        else if (typeof qty === "number") qty = parseFloat(qty.toFixed(4), 10);
-        return { code: r.code || "", quantity: qty, uom: r.uom || "pcs", category: r.category || "" };
+        else qty = parseFloat(Number(qty).toFixed(4), 10);
+        var out = { code: r.code, quantity: qty, uom: r.uom, category: r.category };
+        return out;
       });
+    }
+
+    function buildOfferLinesUrl(importUrl) {
+      if (!importUrl) return "";
+      if (importUrl.indexOf("import-sketch") >= 0) return importUrl.replace("import-sketch", "get-offer-lines");
+      return importUrl;
+    }
+
+    function makeLineKey(item) {
+      var code = ((item && item.code) || "").toString().trim();
+      var uom = ((item && item.uom) || "").toString().trim();
+      var category = ((item && item.category) || "").toString().trim();
+      return code + "|" + uom + "|" + category;
+    }
+
+    function parseOfferQuantity(q) {
+      if (q == null || q === "") return 0;
+      if (typeof q === "number") return isNaN(q) ? 0 : q;
+      var s = String(q).trim().replace(",", ".");
+      var n = parseFloat(s, 10);
+      return isNaN(n) ? 0 : n;
+    }
+
+    function buildOfferLineMaps(lines) {
+      var idsByKey = {};
+      var qtyByKey = {};
+      (lines || []).forEach(function(line) {
+        if (!line) return;
+        var key = makeLineKey(line);
+        if (!key) return;
+        var q = parseOfferQuantity(line.quantity);
+        qtyByKey[key] = (qtyByKey[key] || 0) + q;
+        if (line.id && !idsByKey[key]) idsByKey[key] = String(line.id);
+      });
+      return { idsByKey: idsByKey, qtyByKey: qtyByKey };
+    }
+
+    function extractOfferLines(responseData) {
+      if (!responseData || typeof responseData !== "object") return [];
+      if (responseData.scriptResult && Array.isArray(responseData.scriptResult.result)) return responseData.scriptResult.result;
+      if (Array.isArray(responseData.result)) return responseData.result;
+      return [];
+    }
+
+    function attachExistingIds(items, idsByKey) {
+      return (items || []).map(function(item) {
+        var out = { code: item.code, quantity: item.quantity, uom: item.uom, category: item.category };
+        var id = idsByKey[makeLineKey(item)];
+        if (id) out.id = id;
+        return out;
+      });
+    }
+
+    function fetchJsonResponse(url, payload) {
+      var headers = { "Content-Type": "application/json" };
+      return fetch(url, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify(payload)
+      }).then(function(res) {
+        if (!res.ok) throw new Error("HTTP " + res.status + " " + res.statusText);
+        return res.text().then(function(t) { try { return JSON.parse(t); } catch (_) { return t || {}; } });
+      });
+    }
+
+    function normalizeQtyForCompare(q) {
+      if (q == null) return null;
+      var n = typeof q === "number" ? q : parseFloat(String(q).replace(",", "."));
+      if (isNaN(n)) return null;
+      return n;
+    }
+
+    function qtyChanged(existingQty, newQty) {
+      var a = normalizeQtyForCompare(newQty);
+      var b = normalizeQtyForCompare(existingQty);
+      if (a == null || b == null) return true;
+      // Use a tiny epsilon to avoid float noise, but don't round away real changes (e.g. setting to 0).
+      var EPS = 1e-9;
+      return Math.abs(a - b) > EPS;
+    }
+
+    function loadOfferLines() {
+      var offerId = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
+      if (!offerId) {
+        alert("Please set offer ID of the project.");
+        return;
+      }
+      if (typeof sketchup === "undefined" || !sketchup.get_plugin_settings) {
+        alert("Plugin bridge not available.");
+        return;
+      }
+      pendingPluginSettingsUse = "offer_fetch";
+      sketchup.get_plugin_settings();
+    }
+
+    function doFetchOfferLines(data) {
+      var importUrl = (data && data.import_api_url) ? data.import_api_url.trim() : "";
+      if (!importUrl) {
+        alert("Please set the API URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
+        return;
+      }
+      var importApiKey = (data && data.import_api_key) ? data.import_api_key.trim() : "";
+      var offerId = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
+      var getOfferLinesUrl = buildOfferLinesUrl(importUrl);
+      if (importApiKey) {
+        getOfferLinesUrl += (getOfferLinesUrl.indexOf("?") >= 0 ? "&" : "?") + "apiKey=" + encodeURIComponent(importApiKey);
+      }
+      var statusEl = document.getElementById("status");
+      statusEl.textContent = "Loading offer lines…";
+      statusEl.className = "status";
+      fetchJsonResponse(getOfferLinesUrl, { offer_id: offerId })
+        .then(function(existingRes) {
+          var lines = extractOfferLines(existingRes);
+          var maps = buildOfferLineMaps(lines);
+          offerLinesCache = {
+            offerId: offerId,
+            idsByKey: maps.idsByKey,
+            qtyByKey: maps.qtyByKey
+          };
+          rerenderReportTableWithRules();
+          updateFileMakerEnabled();
+          syncActionButtons();
+          statusEl.textContent = "Offer lines loaded (" + lines.length + " line(s)).";
+          statusEl.className = "status";
+        })
+        .catch(function(err) {
+          statusEl.textContent = "Failed to load offer lines: " + (err.message || String(err));
+          statusEl.className = "status error";
+        });
+    }
+
+    function doImportToFileMaker(data) {
+      var importUrl = (data && data.import_api_url) ? data.import_api_url.trim() : "";
+      if (!importUrl) {
+        alert("Please set the API URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
+        return;
+      }
+      var importApiKey = (data && data.import_api_key) ? data.import_api_key.trim() : "";
+      var url = importUrl;
+      if (importApiKey) {
+        url += (url.indexOf("?") >= 0 ? "&" : "?") + "apiKey=" + encodeURIComponent(importApiKey);
+      }
+      var offerId = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
+
+      var itemsAll = getAggregatedPayload();
+      var idsByKey = {};
+      var qtyByKey = {};
+      if (offerLinesCache && offerLinesCache.offerId === offerId) {
+        idsByKey = offerLinesCache.idsByKey || {};
+        qtyByKey = offerLinesCache.qtyByKey || {};
+      }
+
+      // Only push items that are new OR whose quantity changed vs existing offer.
+      var filteredItems = (itemsAll || []).filter(function(item) {
+        if (!item) return false;
+        var key = makeLineKey(item);
+        if (!key) return false;
+        var existingQty = qtyByKey[key];
+        if (existingQty == null) return true; // new line
+        return qtyChanged(existingQty, item.quantity);
+      });
+
+      var payload = { items: attachExistingIds(filteredItems, idsByKey), offer_id: offerId };
+      var statusEl = document.getElementById("status");
+      statusEl.textContent = "Sending to API… (" + filteredItems.length + " line(s))";
+      statusEl.className = "status";
+      fetchJsonResponse(url, payload)
+        .then(function(_res) {
+          statusEl.textContent = "Export to API completed successfully.";
+          statusEl.className = "status";
+          // Force the user to reload offer lines before exporting again.
+          offerLinesCache = null;
+          syncActionButtons();
+        })
+        .catch(function(err) {
+          statusEl.textContent = "API export failed: " + (err.message || String(err));
+          statusEl.className = "status error";
+        });
     }
 
     function exportToApi() {
@@ -361,9 +836,13 @@
         alert("No exportable data: no components with BOM rules are marked as exportable.");
         return;
       }
-      var offer_id = document.getElementById("offer_id") ? document.getElementById("offer_id").value : "";
+      var offer_id = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
       if (!offer_id) {
         alert("Please set offer ID of the project.");
+        return;
+      }
+      if (!(offerLinesCache && offerLinesCache.offerId === offer_id && offerLinesCache.idsByKey)) {
+        alert("Please click \"Load offer lines\" first so export can update existing FileMaker lines (avoid duplicates).");
         return;
       }
       if (typeof sketchup === "undefined" || !sketchup.check_export_allowed) {
@@ -375,43 +854,22 @@
     }
 
     window.onPluginSettings = function(data) {
-      var url = (data && data.import_api_url) ? data.import_api_url.trim() : "";
-      if (!url) {
-        alert("Please set the API URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
+      var use = pendingPluginSettingsUse || "import";
+      pendingPluginSettingsUse = "import";
+      if (use === "offer_fetch") {
+        doFetchOfferLines(data);
         return;
       }
-      var importApiKey = (data && data.import_api_key) ? data.import_api_key.trim() : "";
-      if (importApiKey) {
-        url += (url.indexOf("?") >= 0 ? "&" : "?") + "apiKey=" + encodeURIComponent(importApiKey);
-      }
-      var payload = { items: getAggregatedPayload(), offer_id: document.getElementById("offer_id") ? document.getElementById("offer_id").value : "" };
-      var statusEl = document.getElementById("status");
-      statusEl.textContent = "Sending to API…";
-      statusEl.className = "status";
-      var headers = { "Content-Type": "application/json" };
-      fetch(url, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(payload)
-      })
-        .then(function(res) {
-          console.log("API export response:", res);
-          if (!res.ok) throw new Error("HTTP " + res.status + " " + res.statusText);
-          return res.text().then(function(t) { try { return JSON.parse(t); } catch (_) { return t || {}; } });
-        })
-        .then(function(res) {
-          statusEl.textContent = "Export to API completed successfully.";
-          statusEl.className = "status";
-        })
-        .catch(function(err) {
-          statusEl.textContent = "API export failed: " + (err.message || String(err));
-          statusEl.className = "status error";
-        });
+      doImportToFileMaker(data);
     };
 
     document.body.addEventListener("change", onExportableCheckboxChange);
+    document.body.addEventListener("change", onExportableToggleAllChange);
 
     (function init() {
+      scanDone = false;
+      updateLoadOfferButtonEnabled();
+      syncActionButtons();
       if (typeof sketchup !== "undefined" && sketchup.get_initial_state) sketchup.get_initial_state();
     })();
   </script>

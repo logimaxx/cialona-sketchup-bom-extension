@@ -11,8 +11,8 @@ module Logimaxx
     # Time bomb: when true, BOM export (scan, CSV, FileMaker, API) is disabled after TIME_BOMB_CUTOFF.
     # Use Time (core Ruby, no require). Set TIME_BOMB_ENABLED = true before release to client.
     # --------------------------------------------------------------------------
-    TIME_BOMB_ENABLED = true
-    TIME_BOMB_CUTOFF = Time.new(2026, 5, 31, 23, 59, 59)
+    TIME_BOMB_ENABLED = false
+    TIME_BOMB_CUTOFF = Time.new(2027, 5, 31, 23, 59, 59)
 
     # When the user opens another file or switches document, re-attach selection observer to the new model.
     class ModelSwitchObserver < Sketchup::AppObserver
@@ -25,6 +25,8 @@ module Logimaxx
       end
 
       def onActivateModel(model)
+        # Skip work when the active model is unchanged (e.g. user just switched window focus).
+        return if Logimaxx::CialonaBOMExporter.selection_observer_attached_to?(model)
         Logimaxx::CialonaBOMExporter.ensure_selection_observer_for_model(model)
       end
     end
@@ -162,12 +164,28 @@ module Logimaxx
     end
 
     def self.register_observers
-      ensure_selection_observer_for_model(Sketchup.active_model)
+      # Selection observer is attached only when the Attributes dialog is open (see ensure_selection_observer_for_model and Attributes on_ready / on_closed).
+    end
+
+    # Returns true if the selection observer is already attached to the given model (no need to re-attach or push).
+    def self.selection_observer_attached_to?(model)
+      return false unless model
+      @selection_observer_model && @selection_observer_model.valid? && @selection_observer_model == model
+    end
+
+    # Removes the selection observer (e.g. when the Attributes dialog is closed). Does not remove ModelSwitchObserver.
+    def self.remove_selection_observer
+      if @selection_observer_model && @selection_observer_model.valid? && @selection_observer
+        @selection_observer_model.selection.remove_observer(@selection_observer) rescue nil
+      end
+      @selection_observer_model = nil
+      @selection_observer = nil
     end
 
     # When opening another file or switching document, observers are lost. Re-attach for the active model.
     def self.ensure_selection_observer_for_model(model)
       return unless model
+      return unless dialogs[:attributes]  # Only maintain observer while Attributes dialog is open
       if @selection_observer_model && @selection_observer_model.valid? && @selection_observer_model == model
         return # already attached to this model
       end

@@ -14,7 +14,7 @@ module Logimaxx
         UOM_OPTIONS = %w[pcs m2 m custom].freeze
         MEASURE_OPTIONS = %w[
           count top_area total_area material_area top_perimeter
-          edge_length bbox_volume bbox_dimensions
+          edge_length bbox_volume bbox_dimensions smart_length
         ].freeze
         SCOPE_OPTIONS = %w[definition instance].freeze
         ROUNDING_MODES = %w[none ceil floor round].freeze
@@ -44,6 +44,9 @@ module Logimaxx
           dialog.add_action_callback('test') { |*_| on_test }
           dialog.add_action_callback('save_attributes') { |_ctx, json| on_save_attributes(json) }
           dialog.add_action_callback('get_catalog_settings') { |*_| on_get_catalog_settings(dialog) }
+          if dialog.respond_to?(:set_on_closed)
+            dialog.set_on_closed { on_closed }
+          end
         end
 
         def self.on_get_catalog_settings(dialog)
@@ -59,13 +62,14 @@ module Logimaxx
 
         def self.on_ready
           ns = Logimaxx::CialonaBOMExporter
-          dialog = ns.dialogs[DIALOG_ID]
-          if dialog
-            model = Sketchup.active_model
-            entities = model ? model.selection.to_a : []
-            payload = ns.build_attributes_selection_payload(entities)
-            Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onSketchUpSelection", payload)
-          end
+          # Attach selection observer only while this dialog is open; it pushes current selection.
+          ns.ensure_selection_observer_for_model(Sketchup.active_model)
+        end
+
+        def self.on_closed
+          ns = Logimaxx::CialonaBOMExporter
+          ns.remove_selection_observer
+          ns.dialogs.delete(DIALOG_ID)
         end
 
         def self.on_test

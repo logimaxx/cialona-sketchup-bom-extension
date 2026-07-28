@@ -296,9 +296,7 @@ module Logimaxx
           instances.each do |inst|
             tr = inst.transformation
             inst.definition.entities.grep(Sketchup::Face).each do |face|
-              area = face.area
-              scale = scale_from_transformation(tr)
-              total += area * scale * scale
+              total += face.area(tr)
             end
           end
           total * area_unit_factor
@@ -371,11 +369,10 @@ module Logimaxx
           total = 0.0
           instances.each do |inst|
             tr = inst.transformation
-            scale = scale_from_transformation(tr)
             inst.definition.entities.grep(Sketchup::Face).each do |face|
               next unless face.material
               next unless face.material.name.to_s == material_name
-              total += face.area * scale * scale
+              total += face.area(tr)
             end
           end
           total * area_unit_factor
@@ -460,6 +457,7 @@ module Logimaxx
           p1.distance(p2)
         end
 
+        # Edge length = length of edges in world space.
         def compute_edge_length(instances)
           total = 0.0
           instances.each do |inst|

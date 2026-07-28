@@ -3,6 +3,8 @@
 # Dialog for running the actual BOM export. Uses BOM::Exporter for traversal and report.
 # ------------------------------------------------------------------------------
 
+require "json"
+
 module Logimaxx
   module CialonaBOMExporter
     module UI
@@ -14,7 +16,7 @@ module Logimaxx
         end
 
         def self.opts
-          { width: 820, height: 520, title: 'Cialona BOM — Export' }
+          { width: 920, height: 520, title: 'Cialona BOM — Export' }
         end
 
         BOM_RULES_DICT = "Cialona_BOM_Rules".freeze
@@ -26,6 +28,7 @@ module Logimaxx
           dialog.add_action_callback('save_bom_csv') { |_ctx, csv_content| on_save_bom_csv(csv_content) }
           dialog.add_action_callback('select_bom_entity') { |_ctx, entity_id| on_select_bom_entity(entity_id) }
           dialog.add_action_callback('set_exportable') { |_ctx, definition_id, exportable| on_set_exportable(dialog, definition_id, exportable) }
+          dialog.add_action_callback('set_exportable_bulk') { |_ctx, definition_ids_json, exportable| on_set_exportable_bulk(dialog, definition_ids_json, exportable) }
           dialog.add_action_callback('get_plugin_settings') { |*_| on_get_plugin_settings(dialog) }
           dialog.add_action_callback('get_initial_state') { |*_| on_get_initial_state(dialog) }
           dialog.add_action_callback('set_project_id') { |_ctx, project_id| on_set_project_id(project_id) }
@@ -84,6 +87,30 @@ module Logimaxx
           dict = definition.attribute_dictionary(BOM_RULES_DICT, true)
           is_exportable = (exportable == true || exportable == 1 || exportable.to_s.downcase == "true")
           dict["exportable"] = is_exportable ? "true" : "false"
+          result = Logimaxx::CialonaBOMExporter::BOM::Exporter.export(model)
+          payload = {
+            rows: result[:rows],
+            rows_without_rules: result[:rows_without_rules] || [],
+            rows_geometry_only: result[:rows_geometry_only] || [],
+            model_length_unit: result[:model_length_unit] || "in"
+          }
+          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", payload)
+        end
+
+        def self.on_set_exportable_bulk(dialog, definition_ids_json, exportable)
+          model = Sketchup.active_model
+          return unless model
+          ids = JSON.parse(definition_ids_json.to_s)
+          return unless ids.is_a?(Array)
+
+          is_exportable = (exportable == true || exportable == 1 || exportable.to_s.downcase == "true")
+          val = is_exportable ? "true" : "false"
+          ids.each do |definition_id|
+            definition = model.definitions.find { |d| d.entityID.to_s == definition_id.to_s }
+            next unless definition
+            dict = definition.attribute_dictionary(BOM_RULES_DICT, true)
+            dict["exportable"] = val
+          end
           result = Logimaxx::CialonaBOMExporter::BOM::Exporter.export(model)
           payload = {
             rows: result[:rows],

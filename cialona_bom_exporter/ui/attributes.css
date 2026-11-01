@@ -6,6 +6,23 @@ body {
     margin: 0;
     padding: 0;
   }
+  .catalog-banner {
+    margin: 8px 10px 0;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .catalog-banner--warning {
+    background: #fff8e6;
+    border: 1px solid #e6c35c;
+    color: #6b5200;
+  }
+  .catalog-banner--error {
+    background: #fdecec;
+    border: 1px solid #e0a0a0;
+    color: #8a1f1f;
+  }
   fieldset {
     border: 1px solid #ccc;
     padding: 10px;
@@ -59,6 +76,16 @@ body {
   }
   .catalog-dropdown .item-code { font-weight: 600; margin-right: 8px; }
   .catalog-dropdown .item-name { color: #555; }
+  .catalog-dropdown .item-source {
+    margin-left: 8px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #fff6d8;
+    color: #6a5a00;
+    font-size: 10px;
+    font-weight: 600;
+    vertical-align: middle;
+  }
   .empty-selection-message {
     margin: 10px;
     padding: 24px 16px;
@@ -100,6 +127,9 @@ body {
   .toolbar-actions.hidden,
   .hidden {
     display: none !important;
+  }
+  body.free-edit-mode .free-edit-only {
+    display: inline-flex !important;
   }
   .btn-save.hidden {
     display: none !important;
@@ -151,3 +181,64 @@ body {
   .attributes-block.collapsed form {
     display: none;
   }
+
+.catalog-debug {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  margin: 0;
+  font-size: 12px;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.28);
+}
+.catalog-debug[hidden] {
+  display: none;
+}
+.catalog-debug-panel {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid #333;
+  border-radius: 0;
+  background: #111;
+  color: #d6ffd6;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 40vh;
+}
+.catalog-debug-panel[hidden] {
+  display: none;
+}
+.catalog-debug-status {
+  padding: 8px;
+  border-bottom: 1px solid #333;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font: 11px/1.35 Consolas, monospace;
+  color: #9ad;
+}
+.catalog-debug-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 6px;
+  border-bottom: 1px solid #333;
+}
+.catalog-debug-actions button {
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+#catalog-debug-log {
+  margin: 0;
+  padding: 8px;
+  min-height: 72px;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 11px/1.35 Consolas, monospace;
+}

@@ -24,8 +24,9 @@ module Logimaxx
         MODEL_KEY_PROJECT_ID = "project_id".freeze
 
         def self.register(dialog)
-          dialog.add_action_callback('run_export') { |*_| on_run_export(dialog) }
+          dialog.add_action_callback('run_export') { |_ctx, export_type| on_run_export(dialog, export_type) }
           dialog.add_action_callback('save_bom_csv') { |_ctx, csv_content| on_save_bom_csv(csv_content) }
+          dialog.add_action_callback('save_piece_csv') { |_ctx, csv_content| on_save_piece_csv(csv_content) }
           dialog.add_action_callback('select_bom_entity') { |_ctx, entity_id| on_select_bom_entity(entity_id) }
           dialog.add_action_callback('set_exportable') { |_ctx, definition_id, exportable| on_set_exportable(dialog, definition_id, exportable) }
           dialog.add_action_callback('set_exportable_bulk') { |_ctx, definition_ids_json, exportable| on_set_exportable_bulk(dialog, definition_ids_json, exportable) }
@@ -54,7 +55,13 @@ module Logimaxx
 
         def self.on_get_initial_state(dialog)
           project_id = stored_project_id
-          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onInitialState", { project_id: project_id })
+          free_edit_mode = Logimaxx::CialonaBOMExporter::UI::Settings.stored_free_edit_mode
+          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onInitialState", {
+            project_id: project_id,
+            free_edit_mode: free_edit_mode,
+            unit_map: Logimaxx::CialonaBOMExporter::UI::Settings.stored_unit_map,
+            dev_mode: File.exist?(File.join(Logimaxx::CialonaBOMExporter::ROOT, "DEV"))
+          })
         end
 
         def self.on_set_project_id(project_id)
@@ -74,9 +81,21 @@ module Logimaxx
         end
 
         def self.on_get_plugin_settings(dialog)
-          import_api_url = Logimaxx::CialonaBOMExporter::UI::Settings.stored_import_api_url
-          import_api_key = Logimaxx::CialonaBOMExporter::UI::Settings.stored_import_api_key
-          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onPluginSettings", { import_api_url: import_api_url, import_api_key: import_api_key })
+          settings = Logimaxx::CialonaBOMExporter::UI::Settings
+          free_edit_mode = settings.stored_free_edit_mode
+          # Withhold connection details so browser-side code cannot call the API in free-edit mode.
+          import_api_url = free_edit_mode ? "" : settings.stored_import_api_url
+          offer_lines_api_url = free_edit_mode ? "" : settings.stored_offer_lines_api_url
+          import_api_key = free_edit_mode ? "" : settings.stored_import_api_key
+          import_api_profile = settings.stored_import_api_profile
+          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onPluginSettings", {
+            import_api_url: import_api_url,
+            offer_lines_api_url: offer_lines_api_url,
+            import_api_key: import_api_key,
+            free_edit_mode: free_edit_mode,
+            import_api_profile: import_api_profile,
+            unit_map: settings.stored_unit_map
+          })
         end
 
         def self.on_set_exportable(dialog, definition_id, exportable)
@@ -92,6 +111,8 @@ module Logimaxx
             rows: result[:rows],
             rows_without_rules: result[:rows_without_rules] || [],
             rows_geometry_only: result[:rows_geometry_only] || [],
+            piece_rows: result[:piece_rows] || [],
+            piece_length_unit: result[:piece_length_unit] || "in",
             model_length_unit: result[:model_length_unit] || "in"
           }
           Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", payload)
@@ -116,6 +137,8 @@ module Logimaxx
             rows: result[:rows],
             rows_without_rules: result[:rows_without_rules] || [],
             rows_geometry_only: result[:rows_geometry_only] || [],
+            piece_rows: result[:piece_rows] || [],
+            piece_length_unit: result[:piece_length_unit] || "in",
             model_length_unit: result[:model_length_unit] || "in"
           }
           Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", payload)
@@ -131,7 +154,7 @@ module Logimaxx
           model.active_view.zoom(model.selection) if model.active_view.respond_to?(:zoom)
         end
 
-        def self.on_run_export(dialog)
+        def self.on_run_export(dialog, export_type = "quantities")
           puts "[BOM Export] on_run_export called"
           blocked, message = export_blocked?
           if blocked
@@ -146,12 +169,20 @@ module Logimaxx
           end
           begin
             puts "[BOM Export] calling Exporter.export..."
-            result = Logimaxx::CialonaBOMExporter::BOM::Exporter.export(model)
+            pieces_mode = export_type.to_s == "pieces"
+            result = if pieces_mode
+                       Logimaxx::CialonaBOMExporter::BOM::Exporter.export_pieces(model)
+                     else
+                       Logimaxx::CialonaBOMExporter::BOM::Exporter.export(model)
+                     end
             puts "[BOM Export] export done, rows=#{result[:rows]&.size}, without_rules=#{result[:rows_without_rules]&.size}, geometry_only=#{result[:rows_geometry_only]&.size}"
             payload = {
-              rows: result[:rows],
+              export_type: pieces_mode ? "pieces" : "quantities",
+              rows: result[:rows] || [],
               rows_without_rules: result[:rows_without_rules] || [],
               rows_geometry_only: result[:rows_geometry_only] || [],
+              piece_rows: result[:piece_rows] || [],
+              piece_length_unit: result[:piece_length_unit] || "in",
               model_length_unit: result[:model_length_unit] || "in"
             }
             Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", payload)
@@ -173,6 +204,20 @@ module Logimaxx
           end
           return ::UI.messagebox("No content to save.") if csv_content.to_s.strip.empty?
           path = ::UI.savepanel("Save BOM as CSV", "", "bom_export.csv")
+          return if path.nil? || path.empty?
+          path = path + ".csv" if path.is_a?(String) && !path.end_with?(".csv")
+          File.write(path, csv_content.to_s, encoding: "UTF-8")
+          ::UI.messagebox("Saved to #{path}")
+        end
+
+        def self.on_save_piece_csv(csv_content)
+          blocked, message = export_blocked?
+          if blocked
+            ::UI.messagebox(message) if message
+            return
+          end
+          return ::UI.messagebox("No piece data to save.") if csv_content.to_s.strip.empty?
+          path = ::UI.savepanel("Save detailed piece list as CSV", "", "piece_export.csv")
           return if path.nil? || path.empty?
           path = path + ".csv" if path.is_a?(String) && !path.end_with?(".csv")
           File.write(path, csv_content.to_s, encoding: "UTF-8")

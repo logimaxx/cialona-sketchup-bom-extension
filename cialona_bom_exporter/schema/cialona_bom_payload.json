@@ -35,7 +35,7 @@
           },
           "uom": {
             "type": "string",
-            "enum": ["pcs", "m2", "m", "custom"]
+            "enum": ["pcs", "m2", "mtr", "m3", "custom"]
           },
           "measure": {
             "type": "string",

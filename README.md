@@ -7,6 +7,18 @@ The goal is not to generate a generic BOM, but a deterministic, reproducible out
 
 ## Scope
 
+### Configurable REST API profiles
+
+The catalog and BOM import/export integrations are configured from **Plugin Settings → Advanced API profiles**. Each JSON profile can define:
+
+- HTTP method and static headers;
+- API-key authentication in a query parameter, header, body, or disabled;
+- nested request paths for search, limits, offer ID, and items;
+- response array paths (including fallbacks) and remote-to-internal field mappings;
+- separate load/export URLs, including `{{import_url}}` and `{{offer_id}}` placeholders.
+
+The automatically supplied defaults preserve the original FileMaker contract. A client-specific profile can therefore be installed without changing extension code.
+
 The extension is responsible for:
 - Reading geometry and metadata from SketchUp models
 - Interpreting components, groups, layers, attributes, and naming conventions according to agreed rules

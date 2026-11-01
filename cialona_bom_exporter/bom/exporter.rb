@@ -23,7 +23,16 @@ module Logimaxx
         LENGTH_UNIT_METER = 4
 
         # Set to true to log top_area details to Ruby Console (Window > Ruby Console).
-        DEBUG_TOP_AREA = true
+        DEBUG_TOP_AREA = false
+
+        # A component together with its transformation from definition space all
+        # the way to model (world) space. ancestor_group_ids is used to identify
+        # groups that contain BOM components without walking SketchUp parents.
+        Occurrence = Struct.new(:instance, :transformation, :ancestor_group_ids, :ancestor_tags, :ancestor_group_names, :visible) do
+          def definition
+            instance.definition
+          end
+        end
 
         attr_reader :model
 
@@ -36,19 +45,17 @@ module Logimaxx
         MAX_TRAVERSAL_DEPTH = 500
         MAX_INSTANCES = 500_000
 
-        # Returns [instances, groups]: component instances (excluding group definitions) and all groups seen.
+        # Returns [occurrences, groups]: component instances with their cumulative
+        # world transformations (excluding group definitions), and all groups seen.
         def collect_component_instances_and_groups(entities = nil)
           entities = entities || model.entities
-          out_instances = []
+          out_occurrences = []
           out_groups = []
-          visited = {}
-          stack = [[entities, 0]]
+          identity = Geom::Transformation.new
+          stack = [[entities, identity, [], [], [], true, 0]]
           while stack.any?
-            ents, depth = stack.pop
+            ents, parent_tr, ancestor_group_ids, ancestor_tags, ancestor_group_names, ancestors_visible, depth = stack.pop
             next if depth > MAX_TRAVERSAL_DEPTH
-            id = ents.object_id
-            next if visited[id]
-            visited[id] = true
             next unless ents.respond_to?(:each)
             ents.each do |e|
               case e
@@ -56,18 +63,25 @@ module Logimaxx
                 next unless e.respond_to?(:entities)
                 out_groups << e
                 child = e.entities
-                stack << [child, depth + 1] if child && !visited[child.object_id]
+                child_tr = parent_tr * e.transformation
+                child_ancestors = ancestor_group_ids + [e.object_id]
+                child_tags = ancestor_tags + [entity_tag_name(e)]
+                child_group_names = ancestor_group_names + [group_name(e)]
+                child_visible = ancestors_visible && entity_and_tag_visible?(e)
+                stack << [child, child_tr, child_ancestors, child_tags, child_group_names, child_visible, depth + 1] if child
               when Sketchup::ComponentInstance
                 next if e.definition.nil?
                 next if e.definition.group?
-                out_instances << e
-                return [out_instances, out_groups] if out_instances.size >= MAX_INSTANCES
+                world_tr = parent_tr * e.transformation
+                occurrence_visible = ancestors_visible && entity_and_tag_visible?(e)
+                out_occurrences << Occurrence.new(e, world_tr, ancestor_group_ids, ancestor_tags, ancestor_group_names, occurrence_visible)
+                return [out_occurrences, out_groups] if out_occurrences.size >= MAX_INSTANCES
               else
                 # Face, Edge, etc. — skip
               end
             end
           end
-          [out_instances, out_groups]
+          [out_occurrences, out_groups]
         end
 
         def collect_component_instances(entities = nil)
@@ -75,14 +89,10 @@ module Logimaxx
         end
 
         # Groups that contain at least one of the given component instances (ancestor chain).
-        def group_ids_containing_instances(instances)
+        def group_ids_containing_instances(occurrences)
           ids = {}
-          instances.each do |inst|
-            owner = inst.respond_to?(:parent) && inst.parent && inst.parent.respond_to?(:parent) ? inst.parent.parent : nil
-            while owner
-              ids[owner.object_id] = true if owner.is_a?(Sketchup::Group)
-              owner = owner.respond_to?(:parent) && owner.parent && owner.parent.respond_to?(:parent) ? owner.parent.parent : nil
-            end
+          occurrences.each do |occurrence|
+            occurrence.ancestor_group_ids.each { |id| ids[id] = true }
           end
           ids
         end
@@ -94,8 +104,8 @@ module Logimaxx
         end
 
         # Group instances by their definition. Returns Hash: definition => [instance, ...]
-        def group_by_definition(instances)
-          instances.group_by(&:definition)
+        def group_by_definition(occurrences)
+          occurrences.group_by(&:definition)
         end
 
         # Load bom_rules (array of rule hashes) from a component definition. Returns [] if none.
@@ -129,7 +139,7 @@ module Logimaxx
           instances_by_definition.each do |definition, insts|
             definition_name = definition.name.to_s.strip
             definition_name = definition.entityID.to_s if definition_name.empty?
-            first_instance = insts&.first
+            first_instance = insts&.first&.instance
             rules = bom_rules_for_definition(definition)
             if rules.empty?
               rows_without_rules << report_row_without_rules(definition, definition_name, insts.size, first_instance)
@@ -148,6 +158,112 @@ module Logimaxx
             rows_geometry_only: rows_geometry_only,
             model_length_unit: model_length_unit_name
           }
+        end
+
+        # Production-oriented parts list. Unlike the quotation BOM above, this
+        # keeps the physical size and assigned SketchUp tag of every occurrence.
+        # Equal occurrences are grouped into one row with a piece count.
+        def build_piece_report(occurrences)
+          grouped = {}
+          occurrences.each do |occurrence|
+            next unless occurrence.visible
+            dimensions = occurrence_dimensions(occurrence)
+            next unless dimensions
+
+            definition = occurrence.definition
+            name = definition.name.to_s.strip
+            name = definition.entityID.to_s if name.empty?
+            tag = effective_tag_name(occurrence)
+            parent_group = (occurrence.ancestor_group_names || []).last.to_s
+            rounded_dimensions = dimensions.map { |value| value.round(4) }
+            key = [name, parent_group, tag, rounded_dimensions]
+            row = grouped[key]
+            if row
+              row[:quantity] += 1
+              row[:entity_ids] << occurrence.instance.entityID if occurrence.instance.respond_to?(:entityID)
+            else
+              entity_id = occurrence.instance.respond_to?(:entityID) ? occurrence.instance.entityID : nil
+              grouped[key] = {
+                tag: tag,
+                group_name: parent_group,
+                definition_name: name,
+                definition_id: definition.entityID,
+                select_entity_id: entity_id,
+                length: rounded_dimensions[0],
+                width: rounded_dimensions[1],
+                thickness: rounded_dimensions[2],
+                quantity: 1,
+                entity_ids: entity_id ? [entity_id] : []
+              }
+            end
+          end
+
+          grouped.values.sort_by do |row|
+            [row[:definition_name].to_s.downcase, row[:group_name].to_s.downcase, row[:tag].to_s.downcase, -row[:length], -row[:width], -row[:thickness]]
+          end
+        end
+
+        # Dimensions along the component's own axes, including instance scale.
+        # Sorting makes groups stable when otherwise identical parts are rotated.
+        def occurrence_dimensions(occurrence)
+          bounds = occurrence.definition.bounds
+          return nil unless bounds && bounds.valid?
+          tr = occurrence.transformation
+          origin = Geom::Point3d.new(0, 0, 0).transform(tr)
+          axis_points = [
+            Geom::Point3d.new(bounds.width, 0, 0),
+            Geom::Point3d.new(0, bounds.height, 0),
+            Geom::Point3d.new(0, 0, bounds.depth)
+          ]
+          values = axis_points.map { |point| origin.distance(point.transform(tr)) * native_length_unit_factor }
+          values.sort.reverse
+        end
+
+        def entity_tag_name(entity)
+          layer = entity.respond_to?(:layer) ? entity.layer : nil
+          name = layer.respond_to?(:name) ? layer.name.to_s.strip : ""
+          name.empty? ? "Untagged" : name
+        end
+
+        # A drawing element is shown only when both the element itself and its
+        # assigned SketchUp tag/layer are visible. Ancestor visibility is
+        # accumulated during traversal and stored on each occurrence.
+        def entity_and_tag_visible?(entity)
+          entity_visible = !entity.respond_to?(:visible?) || entity.visible?
+          layer = entity.respond_to?(:layer) ? entity.layer : nil
+          entity_visible && layer_effectively_visible?(layer)
+        rescue StandardError
+          false
+        end
+
+        def layer_effectively_visible?(layer)
+          return true unless layer
+          return false if layer.respond_to?(:visible?) && !layer.visible?
+
+          folder = layer.respond_to?(:folder) ? layer.folder : nil
+          visited = {}
+          while folder && !visited[folder.object_id]
+            visited[folder.object_id] = true
+            return false if folder.respond_to?(:visible?) && !folder.visible?
+            folder = folder.respond_to?(:folder) ? folder.folder : nil
+          end
+          true
+        end
+
+        def effective_tag_name(occurrence)
+          direct_tag = entity_tag_name(occurrence.instance)
+          return direct_tag unless direct_tag == "Untagged"
+          inherited = (occurrence.ancestor_tags || []).reverse.find { |tag| tag && tag != "Untagged" }
+          inherited || direct_tag
+        end
+
+        def group_name(group)
+          name = group.respond_to?(:name) ? group.name.to_s.strip : ""
+          if name.empty? && group.respond_to?(:definition) && group.definition
+            name = group.definition.name.to_s.strip
+          end
+          name = group.entityID.to_s if name.empty? && group.respond_to?(:entityID)
+          name
         end
 
         def report_row_without_rules(definition, definition_name, count, first_instance = nil)
@@ -248,6 +364,30 @@ module Logimaxx
           end
         end
 
+        # Native model units are more useful for physical piece dimensions than
+        # the quotation units, where every metric model is intentionally in m.
+        def native_length_unit_factor
+          case length_unit_enum
+          when LENGTH_UNIT_INCHES then 1.0
+          when LENGTH_UNIT_FEET then 1.0 / 12.0
+          when LENGTH_UNIT_MILLIMETER then 25.4
+          when LENGTH_UNIT_CENTIMETER then 2.54
+          when LENGTH_UNIT_METER then 0.0254
+          else 1.0
+          end
+        end
+
+        def model_native_length_unit_name
+          case length_unit_enum
+          when LENGTH_UNIT_INCHES then "in"
+          when LENGTH_UNIT_FEET then "ft"
+          when LENGTH_UNIT_MILLIMETER then "mm"
+          when LENGTH_UNIT_CENTIMETER then "cm"
+          when LENGTH_UNIT_METER then "m"
+          else "in"
+          end
+        end
+
         # Compute quantity for a list of instances and a single rule (measure type).
         # Length/area/volume measures are converted to the model's length unit.
         def compute_quantity(instances, rule)
@@ -266,7 +406,15 @@ module Logimaxx
                 when "smart_length" then compute_smart_length(instances)
                 else compute_count(instances)
                 end
-          apply_rounding(raw, rule)
+          apply_rounding(raw.to_f * multiplier_for(rule), rule)
+        end
+
+        # Schema default is 1. Negative values are clamped to 0.
+        def multiplier_for(rule)
+          m = rule["multiplier"] || rule[:multiplier]
+          return 1.0 if m.nil? || m.to_s.strip.empty?
+          f = m.to_f
+          f < 0 ? 0.0 : f
         end
 
         def compute_count(instances)
@@ -275,8 +423,8 @@ module Logimaxx
 
         def compute_bbox_volume(instances)
           total = 0.0
-          instances.each do |inst|
-            b = inst.bounds
+          instances.each do |occurrence|
+            b = transformed_bounds(occurrence)
             next unless b.valid?
             total += b.width * b.height * b.depth
           end
@@ -285,17 +433,17 @@ module Logimaxx
 
         def compute_bbox_dimensions(instances)
           return 0.0 if instances.empty?
-          b = instances.first.bounds
-          instances.drop(1).each { |inst| b.add(inst.bounds) }
+          b = Geom::BoundingBox.new
+          instances.each { |occurrence| add_bounds(b, transformed_bounds(occurrence)) }
           return 0.0 unless b.valid?
           (b.width * b.height * b.depth) * volume_unit_factor
         end
 
         def compute_total_area(instances)
           total = 0.0
-          instances.each do |inst|
-            tr = inst.transformation
-            inst.definition.entities.grep(Sketchup::Face).each do |face|
+          instances.each do |occurrence|
+            tr = occurrence.transformation
+            occurrence.definition.entities.grep(Sketchup::Face).each do |face|
               total += face.area(tr)
             end
           end
@@ -311,25 +459,23 @@ module Logimaxx
           total = 0.0
           z_tol = Z_TOL_TOP_AREA
           up_tol = UP_TOL_TOP_AREA
-          instances.each_with_index do |inst, idx|
-            next unless inst.bounds.valid?
-            tr = inst.transformation
-            max_z = inst.bounds.max.z
-            faces = inst.definition.entities.grep(Sketchup::Face)
+          instances.each_with_index do |occurrence, idx|
+            bounds = transformed_bounds(occurrence)
+            next unless bounds.valid?
+            tr = occurrence.transformation
+            max_z = bounds.max.z
+            faces = occurrence.definition.entities.grep(Sketchup::Face)
             top_faces = faces.select do |f|
-              n = f.normal.clone
-              n.transform!(tr)
-              n.normalize!
+              n = transformed_face_normal(f, tr)
+              next false unless n
               next false if n.z < up_tol
-              p = f.vertices[0].position.clone
-              p.transform!(tr)
-              (max_z - p.z).abs <= z_tol
+              face_at_z?(f, tr, max_z, z_tol)
             end
             area_sq_in = top_faces.sum { |f| f.area(tr) }
             total += area_sq_in
 
             if DEBUG_TOP_AREA && idx == 0
-              puts "\n[BOM top_area DEBUG] #{inst.definition.name} max_z=#{max_z} top_faces=#{top_faces.size} area_sq_in=#{area_sq_in}\n"
+              puts "\n[BOM top_area DEBUG] #{occurrence.definition.name} max_z=#{max_z} top_faces=#{top_faces.size} area_sq_in=#{area_sq_in}\n"
             end
           end
           total * area_unit_factor
@@ -340,19 +486,17 @@ module Logimaxx
           total = 0.0
           z_tol = Z_TOL_TOP_AREA
           down_tol = -UP_TOL_TOP_AREA # n.z <= down_tol for "down"
-          instances.each do |inst|
-            next unless inst.bounds.valid?
-            tr = inst.transformation
-            min_z = inst.bounds.min.z
-            faces = inst.definition.entities.grep(Sketchup::Face)
+          instances.each do |occurrence|
+            bounds = transformed_bounds(occurrence)
+            next unless bounds.valid?
+            tr = occurrence.transformation
+            min_z = bounds.min.z
+            faces = occurrence.definition.entities.grep(Sketchup::Face)
             bottom_faces = faces.select do |f|
-              n = f.normal.clone
-              n.transform!(tr)
-              n.normalize!
+              n = transformed_face_normal(f, tr)
+              next false unless n
               next false if n.z > down_tol
-              p = f.vertices[0].position.clone
-              p.transform!(tr)
-              (min_z - p.z).abs <= z_tol
+              face_at_z?(f, tr, min_z, z_tol)
             end
             area_sq_in = bottom_faces.sum { |f| f.area(tr) }
             total += area_sq_in
@@ -367,9 +511,9 @@ module Logimaxx
           return 0.0 if material_name.empty?
 
           total = 0.0
-          instances.each do |inst|
-            tr = inst.transformation
-            inst.definition.entities.grep(Sketchup::Face).each do |face|
+          instances.each do |occurrence|
+            tr = occurrence.transformation
+            occurrence.definition.entities.grep(Sketchup::Face).each do |face|
               next unless face.material
               next unless face.material.name.to_s == material_name
               total += face.area(tr)
@@ -384,19 +528,17 @@ module Logimaxx
           total = 0.0
           z_tol = Z_TOL_TOP_AREA
           up_tol = UP_TOL_TOP_AREA
-          instances.each do |inst|
-            next unless inst.bounds.valid?
-            tr = inst.transformation
-            max_z = inst.bounds.max.z
-            faces = inst.definition.entities.grep(Sketchup::Face)
+          instances.each do |occurrence|
+            bounds = transformed_bounds(occurrence)
+            next unless bounds.valid?
+            tr = occurrence.transformation
+            max_z = bounds.max.z
+            faces = occurrence.definition.entities.grep(Sketchup::Face)
             top_faces = faces.select do |f|
-              n = f.normal.clone
-              n.transform!(tr)
-              n.normalize!
+              n = transformed_face_normal(f, tr)
+              next false unless n
               next false if n.z < up_tol
-              p = f.vertices[0].position.clone
-              p.transform!(tr)
-              (max_z - p.z).abs <= z_tol
+              face_at_z?(f, tr, max_z, z_tol)
             end
             next if top_faces.empty?
 
@@ -419,19 +561,17 @@ module Logimaxx
           total = 0.0
           z_tol = Z_TOL_TOP_AREA
           down_tol = -UP_TOL_TOP_AREA
-          instances.each do |inst|
-            next unless inst.bounds.valid?
-            tr = inst.transformation
-            min_z = inst.bounds.min.z
-            faces = inst.definition.entities.grep(Sketchup::Face)
+          instances.each do |occurrence|
+            bounds = transformed_bounds(occurrence)
+            next unless bounds.valid?
+            tr = occurrence.transformation
+            min_z = bounds.min.z
+            faces = occurrence.definition.entities.grep(Sketchup::Face)
             bottom_faces = faces.select do |f|
-              n = f.normal.clone
-              n.transform!(tr)
-              n.normalize!
+              n = transformed_face_normal(f, tr)
+              next false unless n
               next false if n.z > down_tol
-              p = f.vertices[0].position.clone
-              p.transform!(tr)
-              (min_z - p.z).abs <= z_tol
+              face_at_z?(f, tr, min_z, z_tol)
             end
             next if bottom_faces.empty?
 
@@ -450,8 +590,6 @@ module Logimaxx
         end
 
         def edge_length_in_world(edge, tr)
-          edge.length(tr)
-        rescue ArgumentError, NoMethodError
           p1 = edge.start.position.transform(tr)
           p2 = edge.end.position.transform(tr)
           p1.distance(p2)
@@ -460,11 +598,10 @@ module Logimaxx
         # Edge length = length of edges in world space.
         def compute_edge_length(instances)
           total = 0.0
-          instances.each do |inst|
-            tr = inst.transformation
-            scale = scale_from_transformation(tr)
-            inst.definition.entities.grep(Sketchup::Edge).each do |edge|
-              total += edge.length * scale
+          instances.each do |occurrence|
+            tr = occurrence.transformation
+            occurrence.definition.entities.grep(Sketchup::Edge).each do |edge|
+              total += edge_length_in_world(edge, tr)
             end
           end
           total * length_unit_factor
@@ -476,7 +613,7 @@ module Logimaxx
         end
 
         # Max curve length in component (recursive into nested instances/groups). Returns inches.
-        def dominant_curve_length_in_inches(comp_instance, recursive: true)
+        def dominant_curve_length_in_inches(occurrence, recursive: true)
           best_len_in = 0.0
           walker = lambda do |entities, tr_acc|
             entities.grep(Sketchup::Edge).each do |e|
@@ -495,32 +632,79 @@ module Logimaxx
               end
             end
           end
-          walker.call(comp_instance.definition.entities, comp_instance.transformation)
+          walker.call(occurrence.definition.entities, occurrence.transformation)
           best_len_in
         end
 
         # Per-instance length: dominant curve length, or max bbox dimension in world (inches).
-        def smart_length_single_in_inches(comp_instance)
-          len_in = dominant_curve_length_in_inches(comp_instance, recursive: true)
+        def smart_length_single_in_inches(occurrence)
+          len_in = dominant_curve_length_in_inches(occurrence, recursive: true)
           return len_in if len_in > 0.0
-          bb = comp_instance.definition.bounds
+          bb = transformed_bounds(occurrence)
           return 0.0 unless bb.valid?
-          tr = comp_instance.transformation
-          sx = tr.xaxis.length
-          sy = tr.yaxis.length
-          sz = tr.zaxis.length
-          [bb.width * sx, bb.depth * sy, bb.height * sz].max.to_f
+          [bb.width, bb.depth, bb.height].max.to_f
         end
 
         def compute_smart_length(instances)
-          total_in = instances.sum { |inst| smart_length_single_in_inches(inst) }
+          total_in = instances.sum { |occurrence| smart_length_single_in_inches(occurrence) }
           total_in * length_unit_factor
         end
 
-        def scale_from_transformation(tr)
-          # Approximate uniform scale from transformation matrix
-          x = Geom::Vector3d.new(1, 0, 0).transform(tr).length
-          [x, 1.0].max
+        def transformed_bounds(occurrence)
+          result = Geom::BoundingBox.new
+          add_entities_to_bounds(
+            occurrence.definition.entities,
+            occurrence.transformation,
+            result,
+            0
+          )
+          result
+        end
+
+        # Build a tight world-space bounding box from transformed geometry.
+        # Transforming a definition bounding box is only conservative after a
+        # rotation and can put max/min Z where no actual face exists.
+        def add_entities_to_bounds(entities, tr, bounds, depth)
+          return bounds if depth > MAX_TRAVERSAL_DEPTH
+
+          entities.each do |entity|
+            case entity
+            when Sketchup::Face
+              entity.vertices.each { |vertex| bounds.add(vertex.position.transform(tr)) }
+            when Sketchup::Edge
+              bounds.add(entity.start.position.transform(tr))
+              bounds.add(entity.end.position.transform(tr))
+            when Sketchup::Group
+              add_entities_to_bounds(entity.entities, tr * entity.transformation, bounds, depth + 1)
+            when Sketchup::ComponentInstance
+              next if entity.definition.nil?
+              add_entities_to_bounds(entity.definition.entities, tr * entity.transformation, bounds, depth + 1)
+            end
+          end
+
+          bounds
+        end
+
+        def add_bounds(target, source)
+          return target unless source.valid?
+          8.times { |index| target.add(source.corner(index)) }
+          target
+        end
+
+        def face_at_z?(face, tr, target_z, tolerance)
+          face.vertices.all? do |vertex|
+            (vertex.position.transform(tr).z - target_z).abs <= tolerance
+          end
+        end
+
+        # Build the normal from transformed geometry. This remains correct for
+        # non-uniform scales, unlike transforming the original normal as a vector.
+        def transformed_face_normal(face, tr)
+          points = face.vertices.first(3).map { |vertex| vertex.position.transform(tr) }
+          return nil if points.size < 3
+          normal = (points[1] - points[0]) * (points[2] - points[0])
+          return nil unless normal.valid? && normal.length > 0.0
+          normal.normalize
         end
 
         def apply_rounding(value, rule)
@@ -565,6 +749,16 @@ module Logimaxx
         # Convenience: run full export and return report rows.
         def self.export(model)
           new(model).build_report
+        end
+
+
+        def self.export_pieces(model)
+          exporter = new(model)
+          occurrences = exporter.collect_component_instances
+          {
+            piece_rows: exporter.build_piece_report(occurrences),
+            piece_length_unit: exporter.model_native_length_unit_name
+          }
         end
       end
     end

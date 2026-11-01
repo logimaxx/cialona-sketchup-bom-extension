@@ -42,12 +42,68 @@
     #section-without-rules .table-wrap { max-height: 220px; }
     th.exportable-th { text-align: center; width: 1%; white-space: nowrap; }
     th.exportable-th .exportable-toggle-all { vertical-align: middle; cursor: pointer; }
+
+    .export-debug {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 40;
+      margin: 0;
+      font-size: 12px;
+      max-height: 40%;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.28);
+    }
+    .export-debug[hidden] { display: none; }
+    .export-debug-panel {
+      margin: 0;
+      border-top: 1px solid #333;
+      background: #111;
+      color: #d6ffd6;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      max-height: 40vh;
+    }
+    .export-debug-status {
+      padding: 8px;
+      border-bottom: 1px solid #333;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font: 11px/1.35 Consolas, monospace;
+      color: #9ad;
+    }
+    .export-debug-actions {
+      display: flex;
+      justify-content: flex-end;
+      padding: 4px 6px;
+      border-bottom: 1px solid #333;
+    }
+    .export-debug-actions button { font-size: 11px; padding: 2px 8px; cursor: pointer; }
+    #export-debug-log {
+      margin: 0;
+      padding: 8px;
+      min-height: 72px;
+      max-height: 140px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 11px/1.35 Consolas, monospace;
+    }
   </style>
   <title>Cialona BOM — Export 1</title>
 </head>
 <body>
   <!-- <script src="devtools.js"></script> -->
   <h2>BOM Export</h2>
+  <!-- Hidden for Cialona: export stays on quantities. Restore this toolbar to offer Pieces again. -->
+  <div class="toolbar" id="export-type-controls" style="display: none;">
+    <strong>Export type:</strong>
+    <label><input type="radio" name="export-type" value="quantities" checked onchange="onExportTypeChange(this.value)"> Quantities</label>
+    <label><input type="radio" name="export-type" value="pieces" onchange="onExportTypeChange(this.value)"> Pieces</label>
+  </div>
   <div class="toolbar">
     <button type="button" class="btn-run" id="btn-run" onclick="runExport()">Scan Model</button>
     <div class="api-config" id="offer-controls" style="display: none;">
@@ -58,6 +114,7 @@
     </div>
 
     <button type="button" class="btn-csv" id="btn-csv" disabled onclick="exportCsv()" style="display: none;">Export to CSV</button>
+    <button type="button" class="btn-csv" id="btn-pieces-csv" disabled onclick="exportPiecesCsv()" style="display: none;">Export pieces to CSV</button>
     <!-- <button type="button" class="btn-csv" style="display: none;" id="btn-filemaker" disabled onclick="exportCsv()">Export to FileMaker</button> -->
     <button type="button" class="btn-api" id="btn-filemaker" disabled onclick="exportToApi()" style="display: none;">Export to FileMaker</button>
   </div>
@@ -118,22 +175,160 @@
     </div>
   </div>
 
+  <div id="section-pieces" style="display: none;">
+    <h3 class="section-title">Pieces</h3>
+    <div class="table-wrap">
+      <table id="report-table-pieces">
+        <thead><tr><th>Code</th><th>Group</th><th>Tag/Layer</th><th id="pieces-length-th">Length</th><th id="pieces-width-th">Width</th><th id="pieces-thickness-th">Thickness</th><th>Quantity</th></tr></thead>
+        <tbody id="report-body-pieces"></tbody>
+      </table>
+    </div>
+  </div>
+
   <p id="empty-msg" class="empty">No data. Run export first.</p>
 
+  <div id="export-debug" class="export-debug" hidden>
+    <div class="export-debug-panel">
+      <div id="export-debug-status" class="export-debug-status"></div>
+      <div class="export-debug-actions">
+        <button type="button" onclick="clearExportDebug()">Clear</button>
+      </div>
+      <pre id="export-debug-log"></pre>
+    </div>
+  </div>
+
+  <script src="api_adapter.js"></script>
+  <script src="unit_map.js"></script>
   <script>
     var reportRows = [];
     var reportRowsWithoutRules = [];
     var reportRowsGeometryOnly = [];
+    var pieceRows = [];
+    var pieceLengthUnit = "in";
+    var exportType = "quantities";
 
     var offerLinesCache = null;
     var pendingPluginSettingsUse = "import";
+    var freeEditModeEnabled = false;
     var exportQtyOverridesByKey = {};
     var scanDone = false;
+
+    var exportDebugEnabled = false;
+    var exportDebugImportUrl = "";
+    var exportDebugOfferLinesUrl = "";
+    var exportDebugKeySet = false;
+    var unitMap = null;
+
+    function externalUom(uom) {
+      if (typeof UnitMap === "undefined") return (uom || "").toString();
+      return UnitMap.toExternal(uom, unitMap);
+    }
+
+    function pluginUom(uom) {
+      if (typeof UnitMap === "undefined") return (uom || "").toString();
+      return UnitMap.toPlugin(uom, unitMap);
+    }
+
+    function redactExportSecrets(value) {
+      var text = typeof value === "string" ? value : JSON.stringify(value);
+      return String(text == null ? "" : text)
+        .replace(/([?&]apiKey=)[^&\s"]*/gi, "$1***")
+        .replace(/("apiKey"\s*:\s*")[^"]*/gi, "$1***")
+        .replace(/(Authorization"\s*:\s*")[^"]*/gi, "$1***");
+    }
+
+    function clipExportText(value, max) {
+      var text = String(value == null ? "" : value);
+      if (text.length <= max) return text;
+      return text.slice(0, max) + "… (" + text.length + " chars)";
+    }
+
+    function summarizeExportResponse(data) {
+      if (Array.isArray(data)) return "array len=" + data.length;
+      if (!data || typeof data !== "object") return typeof data;
+      var summary = "keys=" + Object.keys(data).slice(0, 12).join(",");
+      var scriptResult = data.scriptResult;
+      if (scriptResult && typeof scriptResult === "object") {
+        summary += " scriptResult.keys=" + Object.keys(scriptResult).join(",");
+        if (Array.isArray(scriptResult.result)) summary += " result.len=" + scriptResult.result.length;
+      }
+      return summary;
+    }
+
+    function syncExportDebugDock() {
+      var root = document.getElementById("export-debug");
+      if (!root || root.hidden) {
+        document.body.style.paddingBottom = "";
+        return;
+      }
+      document.body.style.paddingBottom = (root.offsetHeight + 8) + "px";
+    }
+
+    function renderExportDebugStatus() {
+      var el = document.getElementById("export-debug-status");
+      if (!el) return;
+      var offerId = currentOfferId();
+      var offerState = "not loaded";
+      if (offerLinesCache && offerLinesCache.offerId === offerId && offerLinesCache.idsByKey) {
+        offerState = "loaded lines=" + Object.keys(offerLinesCache.qtyByKey || {}).length;
+      }
+      el.textContent = [
+        "type=" + exportType,
+        "freeEdit=" + (freeEditModeEnabled ? "on" : "off"),
+        "project=" + (offerId || "(empty)"),
+        "scan=" + (scanDone ? "done" : "idle") + " rules=" + reportRows.length + " without=" + reportRowsWithoutRules.length + " geometry=" + reportRowsGeometryOnly.length + " pieces=" + pieceRows.length,
+        "offer=" + offerState,
+        "import=" + redactExportSecrets(exportDebugImportUrl || "(not loaded)"),
+        "offerLines=" + redactExportSecrets(exportDebugOfferLinesUrl || "(not loaded)"),
+        "key=" + (exportDebugKeySet ? "set" : "missing")
+      ].join("\n");
+      syncExportDebugDock();
+    }
+
+    function logExportDebug(message) {
+      if (!exportDebugEnabled) return;
+      var line = new Date().toISOString().slice(11, 19) + "  " + message;
+      console.log("[export]", message);
+      var log = document.getElementById("export-debug-log");
+      if (!log) return;
+      log.textContent += (log.textContent ? "\n" : "") + line;
+      log.scrollTop = log.scrollHeight;
+      syncExportDebugDock();
+    }
+
+    function setExportDebugEnabled(on) {
+      exportDebugEnabled = !!on;
+      var root = document.getElementById("export-debug");
+      if (root) root.hidden = !exportDebugEnabled;
+      renderExportDebugStatus();
+      if (exportDebugEnabled) logExportDebug("debug on");
+    }
+
+    function clearExportDebug() {
+      var log = document.getElementById("export-debug-log");
+      if (log) log.textContent = "";
+    }
+    window.clearExportDebug = clearExportDebug;
+    window.addEventListener("resize", syncExportDebugDock);
+
+    function rememberExportApiSettings(data) {
+      exportDebugImportUrl = (data && data.import_api_url) ? String(data.import_api_url).trim() : "";
+      exportDebugOfferLinesUrl = (data && data.offer_lines_api_url) ? String(data.offer_lines_api_url).trim() : "";
+      exportDebugKeySet = !!(data && data.import_api_key && String(data.import_api_key).trim());
+      if (data && data.unit_map) unitMap = data.unit_map;
+      renderExportDebugStatus();
+    }
+
 
     window.onInitialState = function(data) {
       var el = document.getElementById("offer_id");
       if (el && data && data.project_id != null) el.value = data.project_id || "";
+      freeEditModeEnabled = !!(data && (data.free_edit_mode === true || data.free_edit_mode === "true"));
+      if (data && data.unit_map) unitMap = data.unit_map;
+      setExportDebugEnabled(!!(data && (data.dev_mode === true || data.dev_mode === "true")));
       updateLoadOfferButtonEnabled();
+      syncActionButtons();
+      logExportDebug("dialog ready project=" + ((data && data.project_id) ? "set" : "empty") + " freeEdit=" + (freeEditModeEnabled ? "on" : "off"));
     };
 
     function persistProjectId() {
@@ -146,7 +341,7 @@
       var btn = document.getElementById("btn-load-offer-lines");
       var el = document.getElementById("offer_id");
       if (!btn) return;
-      btn.disabled = !scanDone || !el || el.value.trim() === "";
+      btn.disabled = freeEditModeEnabled || !scanDone || !el || el.value.trim() === "";
     }
 
     function onOfferIdInput() {
@@ -183,7 +378,7 @@
         (reportRowsGeometryOnly ? reportRowsGeometryOnly.length : 0);
       var btn = document.getElementById("btn-filemaker");
       if (!btn) return;
-      btn.disabled = totalLines === 0 || !hasOfferLoaded;
+      btn.disabled = freeEditModeEnabled || totalLines === 0 || !hasOfferLoaded;
     }
 
     function setButtonVisibility(buttonId, visible) {
@@ -200,22 +395,26 @@
         (reportRowsGeometryOnly ? reportRowsGeometryOnly.length : 0);
 
       // Project ID input should appear only after scan completed.
-      setButtonVisibility("offer-controls", !!scanDone);
+      setButtonVisibility("offer-controls", exportType === "quantities" && !!scanDone && !freeEditModeEnabled);
 
       // Show Load offer lines only after scan completed.
-      setButtonVisibility("btn-load-offer-lines", !!scanDone);
+      setButtonVisibility("btn-load-offer-lines", exportType === "quantities" && !!scanDone && !freeEditModeEnabled);
       updateLoadOfferButtonEnabled();
 
       // Show export buttons only after offer lines are loaded (and there are scan results).
-      var showScanResults = !!scanDone && totalLines > 0;
+      var showScanResults = exportType === "quantities" && !!scanDone && totalLines > 0;
       var showCsv = showScanResults;
-      var showFileMaker = showScanResults && hasOfferLoaded;
+      var showPiecesCsv = exportType === "pieces" && !!scanDone && pieceRows.length > 0;
+      var showFileMaker = !freeEditModeEnabled && showScanResults && hasOfferLoaded;
 
       setButtonVisibility("btn-csv", showCsv);
+      setButtonVisibility("btn-pieces-csv", showPiecesCsv);
       setButtonVisibility("btn-filemaker", showFileMaker);
 
       var btnCsv = document.getElementById("btn-csv");
       if (btnCsv) btnCsv.disabled = !showCsv;
+      var btnPiecesCsv = document.getElementById("btn-pieces-csv");
+      if (btnPiecesCsv) btnPiecesCsv.disabled = !showPiecesCsv;
 
       // FileMaker enable/disable depends on offer lines + quantities.
       updateFileMakerEnabled();
@@ -260,32 +459,79 @@
       console.log("[BOM Export] onExportResult called", payload ? "rows=" + (payload.rows && payload.rows.length) + " without_rules=" + (payload.rows_without_rules && payload.rows_without_rules.length) + " geometry_only=" + (payload.rows_geometry_only && payload.rows_geometry_only.length) : "no payload");
       try {
         if (payload && payload.error) {
+          logExportDebug("scan error " + (payload.message || "Export failed."));
           document.getElementById("status").textContent = "Error: " + (payload.message || "Export failed.");
           document.getElementById("status").className = "status error";
+          renderExportDebugStatus();
           return;
         }
         scanDone = true;
+        exportType = payload && payload.export_type ? payload.export_type : exportType;
         reportRows = (payload && payload.rows) ? payload.rows : [];
         reportRowsWithoutRules = (payload && payload.rows_without_rules) ? payload.rows_without_rules : [];
         reportRowsGeometryOnly = (payload && payload.rows_geometry_only) ? payload.rows_geometry_only : [];
+        pieceRows = (payload && payload.piece_rows) ? payload.piece_rows : [];
+        pieceLengthUnit = (payload && payload.piece_length_unit) ? payload.piece_length_unit : "in";
         renderTable(reportRows, "report-body", reportRowCells);
         renderTableNoRules(reportRowsWithoutRules);
         renderTableGeometryOnly(reportRowsGeometryOnly);
+        renderPieceTable(pieceRows);
         var totalLines = reportRows.length + reportRowsWithoutRules.length + reportRowsGeometryOnly.length;
         syncActionButtons();
         // document.getElementById("btn-api").disabled = totalLines === 0;
         var unit = (payload && payload.model_length_unit) ? payload.model_length_unit : "in";
         var unitNote = " Length/area/volume in model units (" + unit + ", " + unit + "\u00B2, " + unit + "\u00B3).";
-        var status = totalLines === 0 ? "No components or groups found." : "With rules: " + reportRows.length + ". Without rules: " + reportRowsWithoutRules.length + " type(s). Geometry-only groups: " + reportRowsGeometryOnly.length + "." + unitNote;
+        var status;
+        if (exportType === "pieces") {
+          status = pieceRows.length === 0 ? "No pieces found." : "Pieces: " + pieceRows.length + " grouped row(s). Dimensions in " + pieceLengthUnit + ".";
+        } else {
+          status = totalLines === 0 ? "No components or groups found." : "With rules: " + reportRows.length + ". Without rules: " + reportRowsWithoutRules.length + " type(s). Geometry-only groups: " + reportRowsGeometryOnly.length + "." + unitNote;
+        }
         document.getElementById("status").textContent = status;
         document.getElementById("status").className = "status";
-        document.getElementById("empty-msg").style.display = totalLines === 0 ? "block" : "none";
+        logExportDebug("scan result " + status.replace(/\s+/g, " "));
+        renderExportDebugStatus();
+        var resultCount = exportType === "pieces" ? pieceRows.length : totalLines;
+        document.getElementById("empty-msg").style.display = resultCount === 0 ? "block" : "none";
       } catch (e) {
         console.error("[BOM Export] onExportResult error", e);
+        logExportDebug("scan render error " + (e && e.message ? e.message : e));
         document.getElementById("status").textContent = "Error: " + (e.message || String(e));
         document.getElementById("status").className = "status error";
       }
     };
+
+    function renderPieceTable(rows) {
+      var tbody = document.getElementById("report-body-pieces");
+      var section = document.getElementById("section-pieces");
+      document.getElementById("pieces-length-th").textContent = "Length (" + pieceLengthUnit + ")";
+      document.getElementById("pieces-width-th").textContent = "Width (" + pieceLengthUnit + ")";
+      document.getElementById("pieces-thickness-th").textContent = "Thickness (" + pieceLengthUnit + ")";
+      tbody.innerHTML = "";
+      section.style.display = rows && rows.length ? "block" : "none";
+      (rows || []).forEach(function(r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + escapeHtml(r.definition_name || "") + "</td>" +
+          "<td>" + escapeHtml(r.group_name || "") + "</td>" +
+          "<td>" + escapeHtml(r.tag || "Untagged") + "</td>" +
+          "<td>" + escapeHtml(formatQuantity(r.length)) + "</td>" +
+          "<td>" + escapeHtml(formatQuantity(r.width)) + "</td>" +
+          "<td>" + escapeHtml(formatQuantity(r.thickness)) + "</td>" +
+          "<td>" + escapeHtml(formatQuantity(r.quantity)) + "</td>";
+        makeRowSelectable(tr, r.select_entity_id);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function exportPiecesCsv() {
+      if (!pieceRows.length) return;
+      var line = function(arr) { return arr.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(","); };
+      var csv = line(["code", "group", "tag/layer", "length (" + pieceLengthUnit + ")", "width (" + pieceLengthUnit + ")", "thickness (" + pieceLengthUnit + ")", "quantity"]) + "\n";
+      pieceRows.forEach(function(r) {
+        csv += line([r.definition_name || "", r.group_name || "", r.tag || "Untagged", r.length, r.width, r.thickness, r.quantity]) + "\n";
+      });
+      sketchup.save_piece_csv(csv);
+    }
 
     function offerQtyDisplayForRow(r) {
       var uom = r && r.uom ? r.uom : "";
@@ -504,6 +750,7 @@
 
     function runExport() {
       console.log("[BOM Export] runExport clicked, calling sketchup.run_export()");
+      logExportDebug("scan start type=" + exportType);
       document.getElementById("status").textContent = "Running export…";
       document.getElementById("status").className = "status";
       scanDone = false;
@@ -514,20 +761,44 @@
       reportRows = [];
       reportRowsWithoutRules = [];
       reportRowsGeometryOnly = [];
+      pieceRows = [];
       exportQtyOverridesByKey = {};
       renderTable([], "report-body", reportRowCells);
       renderTableNoRules([]);
       renderTableGeometryOnly([]);
+      renderPieceTable([]);
       document.getElementById("btn-csv").disabled = true;
       document.getElementById("btn-filemaker").disabled = true;
       try {
-        sketchup.run_export();
+        sketchup.run_export(exportType);
         console.log("[BOM Export] sketchup.run_export() returned");
       } catch (e) {
         console.error("[BOM Export] run_export threw", e);
+        logExportDebug("scan threw " + (e && e.message ? e.message : e));
         document.getElementById("status").textContent = "Error: " + (e.message || String(e));
         document.getElementById("status").className = "status error";
       }
+    }
+
+    function onExportTypeChange(value) {
+      exportType = value === "pieces" ? "pieces" : "quantities";
+      scanDone = false;
+      reportRows = [];
+      reportRowsWithoutRules = [];
+      reportRowsGeometryOnly = [];
+      pieceRows = [];
+      offerLinesCache = null;
+      exportQtyOverridesByKey = {};
+      renderTable([], "report-body", reportRowCells);
+      renderTableNoRules([]);
+      renderTableGeometryOnly([]);
+      renderPieceTable([]);
+      document.getElementById("section-with-rules").style.display = "none";
+      document.getElementById("section-without-rules").style.display = "none";
+      document.getElementById("section-geometry-only").style.display = "none";
+      document.getElementById("empty-msg").style.display = "block";
+      document.getElementById("status").textContent = "Click \u00ABScan Model\u00BB to generate the selected export.";
+      syncActionButtons();
     }
 
     function isExportable(r) {
@@ -538,6 +809,7 @@
 
     window.onExportCheckResult = function(data) {
       if (!data || !data.allowed) {
+        logExportDebug("export blocked " + ((data && data.message) || ""));
         if (data && data.message) alert(data.message);
         pendingExportAction = null;
         return;
@@ -566,8 +838,9 @@
         if (Number.isInteger(qty)) qty = String(qty);
         else if (typeof qty === "number") qty = qty.toFixed(4).replace(/\.?0+$/, "") || "0";
         else qty = String(r.quantity);
-        csv += line([r.code || "", qty, r.uom || "pcs", r.category || ""]) + "\n";
+        csv += line([r.code || "", qty, externalUom(r.uom || "pcs"), r.category || ""]) + "\n";
       });
+      logExportDebug("csv rows=" + aggregated.length);
       sketchup.save_bom_csv(csv);
     }
 
@@ -575,11 +848,13 @@
       if (reportRows.length === 0 && reportRowsWithoutRules.length === 0 && reportRowsGeometryOnly.length === 0) return;
       var hasExportableWithoutRules = reportRowsWithoutRules.some(isExportable);
       if (hasExportableWithoutRules) {
+        logExportDebug("csv refused: exportable components without BOM rules");
         alert("Export is not allowed: one or more components in \"Components without BOM rules\" are marked as exportable. Remove the exportable flag from those components or add BOM rules to them.");
         return;
       }
       var exportableWithRules = reportRows.filter(isExportable);
       if (exportableWithRules.length === 0) {
+        logExportDebug("csv refused: no exportable components with rules");
         alert("No exportable data: no components with BOM rules are marked as exportable.");
         return;
       }
@@ -646,10 +921,20 @@
       });
     }
 
-    function buildOfferLinesUrl(importUrl) {
-      if (!importUrl) return "";
-      if (importUrl.indexOf("import-sketch") >= 0) return importUrl.replace("import-sketch", "get-offer-lines");
-      return importUrl;
+    function buildOfferLinesUrl(offerLinesUrl, importUrl, loadSpec) {
+      if (!offerLinesUrl && !importUrl) return "";
+      var spec = loadSpec || {};
+      var template = spec.url || "{{offer_lines_url}}";
+      // Older profiles pointed load at the import URL and rewrote import-sketch.
+      if (offerLinesUrl && template.indexOf("{{offer_lines_url}}") < 0 && template.indexOf("{{import_url}}") >= 0) {
+        template = "{{offer_lines_url}}";
+      }
+      var url = ApiAdapter.interpolate(template, {
+        import_url: importUrl || "",
+        offer_lines_url: offerLinesUrl || ""
+      });
+      if (!offerLinesUrl && spec.replace && spec.replace.from) url = url.replace(spec.replace.from, spec.replace.to || "");
+      return url;
     }
 
     function makeLineKey(item) {
@@ -681,11 +966,22 @@
       return { idsByKey: idsByKey, qtyByKey: qtyByKey };
     }
 
-    function extractOfferLines(responseData) {
+    function extractOfferLines(responseData, profile) {
       if (!responseData || typeof responseData !== "object") return [];
-      if (responseData.scriptResult && Array.isArray(responseData.scriptResult.result)) return responseData.scriptResult.result;
-      if (Array.isArray(responseData.result)) return responseData.result;
-      return [];
+      var responseSpec = (profile.load && profile.load.response) || {};
+      var lines = ApiAdapter.get(responseData, responseSpec.items_path || "scriptResult.result", null);
+      (responseSpec.fallback_items_paths || ["result"]).some(function(path) {
+        if (Array.isArray(lines)) return true;
+        lines = ApiAdapter.get(responseData, path, null);
+        return Array.isArray(lines);
+      });
+      if (!Array.isArray(lines)) return [];
+      var fields = profile.fields || { id: "id", code: "code", quantity: "quantity", uom: "uom", category: "category" };
+      return lines.map(function(line) {
+        var item = ApiAdapter.mapFields(line, fields);
+        if (item) item.uom = pluginUom(item.uom);
+        return item;
+      });
     }
 
     function attachExistingIds(items, idsByKey) {
@@ -697,16 +993,8 @@
       });
     }
 
-    function fetchJsonResponse(url, payload) {
-      var headers = { "Content-Type": "application/json" };
-      return fetch(url, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(payload)
-      }).then(function(res) {
-        if (!res.ok) throw new Error("HTTP " + res.status + " " + res.statusText);
-        return res.text().then(function(t) { try { return JSON.parse(t); } catch (_) { return t || {}; } });
-      });
+    function fetchJsonResponse(url, payload, spec, apiKey, variables) {
+      return ApiAdapter.request(url, spec || {}, payload, { api_key: apiKey }, variables || {});
     }
 
     function normalizeQtyForCompare(q) {
@@ -726,6 +1014,10 @@
     }
 
     function loadOfferLines() {
+      if (freeEditModeEnabled) {
+        alert("FileMaker API operations are disabled in Free edit mode.");
+        return;
+      }
       var offerId = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
       if (!offerId) {
         alert("Please set offer ID of the project.");
@@ -740,23 +1032,32 @@
     }
 
     function doFetchOfferLines(data) {
+      rememberExportApiSettings(data);
       var importUrl = (data && data.import_api_url) ? data.import_api_url.trim() : "";
-      if (!importUrl) {
-        alert("Please set the API URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
+      var offerLinesUrl = (data && data.offer_lines_api_url) ? data.offer_lines_api_url.trim() : "";
+      if (!offerLinesUrl) {
+        logExportDebug("load offer aborted: offer lines URL missing");
+        alert("Please set the offer lines URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
         return;
       }
       var importApiKey = (data && data.import_api_key) ? data.import_api_key.trim() : "";
+      var profile = ApiAdapter.parse(data && data.import_api_profile, {});
+      var loadSpec = Object.assign({}, profile, profile.load || {});
+      loadSpec.auth = (profile.load && profile.load.auth) || profile.auth;
       var offerId = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
-      var getOfferLinesUrl = buildOfferLinesUrl(importUrl);
-      if (importApiKey) {
-        getOfferLinesUrl += (getOfferLinesUrl.indexOf("?") >= 0 ? "&" : "?") + "apiKey=" + encodeURIComponent(importApiKey);
-      }
+      var getOfferLinesUrl = buildOfferLinesUrl(offerLinesUrl, importUrl, profile.load);
       var statusEl = document.getElementById("status");
       statusEl.textContent = "Loading offer lines…";
       statusEl.className = "status";
-      fetchJsonResponse(getOfferLinesUrl, { offer_id: offerId })
+      var loadPayload = {};
+      ApiAdapter.set(loadPayload, ((profile.load || {}).request || {}).offer_id_path || "offer_id", offerId);
+      logExportDebug("load offer " + String(loadSpec.method || "POST").toUpperCase() + " " + redactExportSecrets(getOfferLinesUrl || "(empty)") + " key=" + (importApiKey ? "set" : "missing") + " offer=" + offerId);
+      logExportDebug("  body " + clipExportText(redactExportSecrets(loadPayload), 500));
+      fetchJsonResponse(getOfferLinesUrl, loadPayload, loadSpec, importApiKey, { import_url: importUrl, offer_lines_url: offerLinesUrl, offer_id: offerId })
         .then(function(existingRes) {
-          var lines = extractOfferLines(existingRes);
+          var lines = extractOfferLines(existingRes, profile);
+          logExportDebug("  ok lines=" + lines.length + " " + summarizeExportResponse(existingRes));
+          if (!lines.length) logExportDebug("  raw " + clipExportText(redactExportSecrets(existingRes), 1500));
           var maps = buildOfferLineMaps(lines);
           offerLinesCache = {
             offerId: offerId,
@@ -766,26 +1067,30 @@
           rerenderReportTableWithRules();
           updateFileMakerEnabled();
           syncActionButtons();
+          renderExportDebugStatus();
           statusEl.textContent = "Offer lines loaded (" + lines.length + " line(s)).";
           statusEl.className = "status";
         })
         .catch(function(err) {
+          logExportDebug("  error " + (err && err.message ? err.message : err));
           statusEl.textContent = "Failed to load offer lines: " + (err.message || String(err));
           statusEl.className = "status error";
         });
     }
 
     function doImportToFileMaker(data) {
+      rememberExportApiSettings(data);
       var importUrl = (data && data.import_api_url) ? data.import_api_url.trim() : "";
       if (!importUrl) {
-        alert("Please set the API URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
+        logExportDebug("filemaker aborted: import URL missing");
+        alert("Please set the import URL in Plugin Settings (Extensions → Cialona BOM Exporter → Settings).");
         return;
       }
       var importApiKey = (data && data.import_api_key) ? data.import_api_key.trim() : "";
-      var url = importUrl;
-      if (importApiKey) {
-        url += (url.indexOf("?") >= 0 ? "&" : "?") + "apiKey=" + encodeURIComponent(importApiKey);
-      }
+      var profile = ApiAdapter.parse(data && data.import_api_profile, {});
+      var exportSpec = Object.assign({}, profile, profile.export || {});
+      exportSpec.auth = (profile.export && profile.export.auth) || profile.auth;
+      var url = ApiAdapter.interpolate((profile.export || {}).url || "{{import_url}}", { import_url: importUrl });
       var offerId = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
 
       var itemsAll = getAggregatedPayload();
@@ -806,42 +1111,73 @@
         return qtyChanged(existingQty, item.quantity);
       });
 
-      var payload = { items: attachExistingIds(filteredItems, idsByKey), offer_id: offerId };
+      var requestSpec = (profile.export && profile.export.request) || {};
+      var fields = profile.fields || { id: "id", code: "code", quantity: "quantity", uom: "uom", category: "category" };
+      var outgoingItems = attachExistingIds(filteredItems, idsByKey).map(function(item) {
+        var source = {
+          code: item.code,
+          quantity: item.quantity,
+          uom: externalUom(item.uom),
+          category: item.category,
+          id: item.id
+        };
+        var mapped = {};
+        Object.keys(fields).forEach(function(canonical) {
+          if (source[canonical] != null && source[canonical] !== "") ApiAdapter.set(mapped, fields[canonical], source[canonical]);
+        });
+        return mapped;
+      });
+      var payload = {};
+      ApiAdapter.set(payload, requestSpec.items_path || "items", outgoingItems);
+      ApiAdapter.set(payload, requestSpec.offer_id_path || "offer_id", offerId);
       var statusEl = document.getElementById("status");
       statusEl.textContent = "Sending to API… (" + filteredItems.length + " line(s))";
       statusEl.className = "status";
-      fetchJsonResponse(url, payload)
-        .then(function(_res) {
+      logExportDebug("filemaker " + String(exportSpec.method || "POST").toUpperCase() + " " + redactExportSecrets(url || "(empty)") + " key=" + (importApiKey ? "set" : "missing") + " changed=" + filteredItems.length + "/" + itemsAll.length);
+      logExportDebug("  body " + clipExportText(redactExportSecrets(payload), 1500));
+      fetchJsonResponse(url, payload, exportSpec, importApiKey, { import_url: importUrl, offer_id: offerId })
+        .then(function(res) {
+          logExportDebug("  ok " + summarizeExportResponse(res));
           statusEl.textContent = "Export to API completed successfully.";
           statusEl.className = "status";
           // Force the user to reload offer lines before exporting again.
           offerLinesCache = null;
           syncActionButtons();
+          renderExportDebugStatus();
         })
         .catch(function(err) {
+          logExportDebug("  error " + (err && err.message ? err.message : err));
           statusEl.textContent = "API export failed: " + (err.message || String(err));
           statusEl.className = "status error";
         });
     }
 
     function exportToApi() {
+      if (freeEditModeEnabled) {
+        alert("Export to FileMaker API is disabled in Free edit mode.");
+        return;
+      }
       if (reportRows.length === 0 && reportRowsWithoutRules.length === 0 && reportRowsGeometryOnly.length === 0) return;
       var hasExportableWithoutRules = reportRowsWithoutRules.some(isExportable);
       if (hasExportableWithoutRules) {
+        logExportDebug("filemaker refused: exportable components without BOM rules");
         alert("Export is not allowed: one or more components in \"Components without BOM rules\" are marked as exportable. Remove the exportable flag from those components or add BOM rules to them.");
         return;
       }
       var exportableWithRules = reportRows.filter(isExportable);
       if (exportableWithRules.length === 0) {
+        logExportDebug("filemaker refused: no exportable components with rules");
         alert("No exportable data: no components with BOM rules are marked as exportable.");
         return;
       }
       var offer_id = document.getElementById("offer_id") ? document.getElementById("offer_id").value.trim() : "";
       if (!offer_id) {
+        logExportDebug("filemaker refused: project ID missing");
         alert("Please set offer ID of the project.");
         return;
       }
       if (!(offerLinesCache && offerLinesCache.offerId === offer_id && offerLinesCache.idsByKey)) {
+        logExportDebug("filemaker refused: offer lines not loaded");
         alert("Please click \"Load offer lines\" first so export can update existing FileMaker lines (avoid duplicates).");
         return;
       }
@@ -854,6 +1190,14 @@
     }
 
     window.onPluginSettings = function(data) {
+      rememberExportApiSettings(data);
+      freeEditModeEnabled = !!(data && (data.free_edit_mode === true || data.free_edit_mode === "true"));
+      if (freeEditModeEnabled) {
+        pendingPluginSettingsUse = "import";
+        logExportDebug("api blocked: free edit mode");
+        alert("FileMaker API operations are disabled in Free edit mode.");
+        return;
+      }
       var use = pendingPluginSettingsUse || "import";
       pendingPluginSettingsUse = "import";
       if (use === "offer_fetch") {

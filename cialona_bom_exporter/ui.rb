@@ -45,6 +45,7 @@ module Logimaxx
       # Callers (so you can find who triggers which callback):
       #   onSettingsLoaded  -> ui/settings.rb (on_get_settings)
       #   onSettingsSaved   -> ui/settings.rb (on_save_settings)
+      #   onCatalogCsvPicked -> ui/settings.rb (pick_catalog_csv, preview_catalog_csv)
       #   onCatalogSettings -> ui/attributes.rb (on_get_catalog_settings)
       #   onSketchUpSelection -> main.rb, ui/attributes.rb
       #   onExportCheckResult, onInitialState, onPluginSettings, onExportResult -> ui/bom_exporter.rb
@@ -53,7 +54,8 @@ module Logimaxx
         json = data.to_json
         b64 = Base64.strict_encode64(json)
         # Base64 uses only A-Za-z0-9+/= so safe inside single-quoted JS string
-        script = "(function(){try{var d=JSON.parse(atob('#{b64}'));if(window.#{js_callback_name})window.#{js_callback_name}(d);}catch(e){console.error('inject_json:',e.message||e,e.stack||'');}})();"
+        # atob() yields binary bytes. Decode them as UTF-8 so aliases such as m² survive.
+        script = "(function(){try{var b=atob('#{b64}');var u=decodeURIComponent(Array.prototype.map.call(b,function(c){return '%'+('00'+c.charCodeAt(0).toString(16)).slice(-2);}).join(''));var d=JSON.parse(u);if(window.#{js_callback_name})window.#{js_callback_name}(d);}catch(e){console.error('inject_json:',e.message||e,e.stack||'');}})();"
         dialog.execute_script(script)
       end
     end

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { height: 100%; overflow: hidden; }
+    body { font: 13px/1.4 "Segoe UI", sans-serif; margin: 0; padding: 16px; background: #f0f2f5; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+    h2 { margin: 0 0 12px; font-size: 16px; flex: none; }
+    .tabs { display: flex; gap: 4px; margin: 0 0 12px; border-bottom: 1px solid #d0d4da; flex: none; }
+    .tab-content { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
+    .tab { background: transparent; border: none; border-bottom: 2px solid transparent; padding: 8px 14px; margin-bottom: -1px; cursor: pointer; font-size: 13px; color: #555; }
+    .tab.active { color: #2171b8; border-bottom-color: #2171b8; font-weight: 600; }
+    .panel[hidden] { display: none; }
+    .step { margin-bottom: 20px; }
+    .step-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+    .field input[type="url"], .field input[type="text"], .field input[type="password"], .field select { width: 100%; max-width: 400px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box; background: #fff; }
+    .field input[type="url"] { max-width: 100%; }
+    .field input[type="checkbox"] { margin-right: 6px; }
+    .field input:disabled, .field select:disabled, .unit-map input:disabled { opacity: 0.55; background: #eee; }
+    .hint { font-size: 11px; color: #777; margin-top: 4px; }
+    .path-row { display: flex; gap: 8px; align-items: center; max-width: 520px; }
+    .path-row input { flex: 1; max-width: none; }
+    .unit-map { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .unit-map th, .unit-map td { text-align: left; font-size: 12px; padding: 4px 8px 4px 0; vertical-align: middle; }
+    .unit-map input { width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; box-sizing: border-box; }
+    .unit-map .plugin-unit { font-weight: 600; width: 64px; }
+    .actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex: none; }
+    .message { flex: none; }
+    .btn { padding: 8px 16px; cursor: pointer; border: none; border-radius: 4px; font-size: 13px; }
+    .btn-save { background: #2171b8; color: #fff; }
+    .btn-save:hover { background: #1a5a94; }
+    .btn-cancel, .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-cancel:hover, .btn-secondary:hover { background: #d0d0d0; }
+    .btn:disabled { opacity: 0.55; cursor: default; }
+    .message { margin-top: 12px; font-size: 12px; color: #2d7d2d; }
+    .message.error { color: #b00; }
+  </style>
+  <title>Plugin Settings</title>
+</head>
+<body>
+  <h2>Plugin Settings</h2>
+  <div class="tabs">
+    <button type="button" class="tab active" id="tab-general" onclick="showTab('general')">General</button>
+    <button type="button" class="tab" id="tab-filemaker" onclick="showTab('filemaker')">FileMaker</button>
+    <button type="button" class="tab" id="tab-csv" onclick="showTab('csv')">CSV</button>
+  </div>
+
+  <div class="tab-content">
+  <div class="panel" id="panel-general">
+    <div class="step">
+      <div class="step-title">Editing mode</div>
+      <div class="field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="free_edit_mode" onchange="updateFreeEditModeUi()" />
+          <span>Free edit mode</span>
+        </label>
+        <p class="hint">Allows arbitrary attribute values. All FileMaker API operations are disabled in this mode.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-title">Catalog/Orders API</div>
+      <div class="field">
+        <label for="catalog_source">Default adapter</label>
+        <select id="catalog_source" onchange="updateCatalogSourceUi()">
+          <option value="api">FileMaker</option>
+          <option value="csv">CSV</option>
+        </select>
+        <p class="hint">Supplies products for search and code validation. Import and export stay on FileMaker. Orders API is used to get the order lines.</p>
+      </div>
+      <div class="field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="catalog_validate_codes" checked />
+          <span>Validate product codes against catalog (recommended)</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-filemaker" hidden>
+    <div class="step">
+      <div class="step-title">API configuration</div>
+      <div class="field">
+        <label for="catalog_api_url">Catalog API URL</label>
+        <input type="url" id="catalog_api_url" placeholder="https://example.com/.../query_products" />
+        <p class="hint">Searches products and subgroups.</p>
+      </div>
+      <div class="field">
+        <label for="import_api_url">Import into FileMaker URL</label>
+        <input type="url" id="import_api_url" placeholder="https://example.com/.../import-sketch" />
+        <p class="hint">Writes the design into the FileMaker offer.</p>
+      </div>
+      <div class="field">
+        <label for="offer_lines_api_url">Get offer lines from FileMaker URL</label>
+        <input type="url" id="offer_lines_api_url" placeholder="https://example.com/.../get-offer-lines" />
+        <p class="hint">Reads the current offer lines.</p>
+      </div>
+      <div class="field">
+        <label for="filemaker_api_key">API Key</label>
+        <input type="password" id="filemaker_api_key" placeholder="API key" autocomplete="off" />
+        <p class="hint">Sent with catalog search, import, and offer-lines requests.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-title">Unit mapping</div>
+      <p class="hint">Plugin units stay fixed. External unit is written on BOM export and matched when offer lines are loaded. Also accepted lists extra catalog names, separated by commas.</p>
+      <table class="unit-map">
+        <thead>
+          <tr><th>Plugin</th><th>External unit</th><th>Also accepted</th></tr>
+        </thead>
+        <tbody id="unit-map-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-csv" hidden>
+    <div class="step">
+      <div class="step-title">Catalog file</div>
+      <div class="field">
+        <label for="catalog_csv_path">CSV file</label>
+        <div class="path-row">
+          <input type="text" id="catalog_csv_path" readonly placeholder="No file selected" />
+          <button type="button" class="btn btn-secondary" id="btn-browse-csv" onclick="browseCatalogCsv()">Browse</button>
+          <button type="button" class="btn btn-secondary" id="btn-clear-csv" onclick="clearCatalogCsv()">Clear</button>
+        </div>
+        <p class="hint" id="csv-header-hint">Choose a CSV file.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-title">Field mapping</div>
+      <p class="hint">Choose a CSV column for each product field. Code is required when CSV is the default adapter.</p>
+      <div class="field">
+        <label for="csv-field-code">Code</label>
+        <select id="csv-field-code" class="csv-field"></select>
+      </div>
+      <div class="field">
+        <label for="csv-field-name">Name</label>
+        <select id="csv-field-name" class="csv-field"></select>
+      </div>
+      <div class="field">
+        <label for="csv-field-unit">Unit</label>
+        <select id="csv-field-unit" class="csv-field"></select>
+      </div>
+      <div class="field">
+        <label for="csv-field-category">Category</label>
+        <select id="csv-field-category" class="csv-field"></select>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn btn-save" id="btn-save" onclick="saveSettings()">Save</button>
+    <button type="button" class="btn btn-cancel" id="btn-cancel" onclick="closeDialog()">Cancel</button>
+  </div>
+  <p class="message" id="message" style="display: none;"></p>
+
+  <script src="unit_map.js"></script>
+  <script>
+    var CSV_FIELDS = ["code", "name", "unit", "category"];
+    var TABS = ["general", "filemaker", "csv"];
+
+    function showTab(name) {
+      if (TABS.indexOf(name) < 0) name = "general";
+      TABS.forEach(function(tab) {
+        var panel = document.getElementById("panel-" + tab);
+        var button = document.getElementById("tab-" + tab);
+        if (panel) panel.hidden = tab !== name;
+        if (button) button.className = tab === name ? "tab active" : "tab";
+      });
+      var scroller = document.querySelector(".tab-content");
+      if (scroller) scroller.scrollTop = 0;
+    }
+
+    function renderUnitMap(value) {
+      var body = document.getElementById("unit-map-body");
+      if (!body || typeof UnitMap === "undefined") return;
+      var map = UnitMap.parse(value);
+      body.innerHTML = "";
+      UnitMap.UNITS.forEach(function(uom) {
+        var entry = map[uom];
+        var row = document.createElement("tr");
+        var plugin = document.createElement("td");
+        plugin.className = "plugin-unit";
+        plugin.textContent = uom;
+        var exportCell = document.createElement("td");
+        var exportInput = document.createElement("input");
+        exportInput.type = "text";
+        exportInput.id = "unit-export-" + uom;
+        exportInput.value = entry.export || uom;
+        exportCell.appendChild(exportInput);
+        var acceptCell = document.createElement("td");
+        var acceptInput = document.createElement("input");
+        acceptInput.type = "text";
+        acceptInput.id = "unit-accept-" + uom;
+        acceptInput.value = (entry.accept || []).join(", ");
+        acceptCell.appendChild(acceptInput);
+        row.appendChild(plugin);
+        row.appendChild(exportCell);
+        row.appendChild(acceptCell);
+        body.appendChild(row);
+      });
+    }
+
+    function collectUnitMap() {
+      var map = {};
+      var seen = {};
+      UnitMap.UNITS.forEach(function(uom) {
+        var exportName = document.getElementById("unit-export-" + uom).value.trim() || uom;
+        var accept = document.getElementById("unit-accept-" + uom).value.split(",").map(function(part) {
+          return part.trim();
+        }).filter(function(part) {
+          return part && part.toLowerCase() !== uom.toLowerCase() && part.toLowerCase() !== exportName.toLowerCase();
+        });
+        [uom, exportName].concat(accept).forEach(function(token) {
+          var key = token.toLowerCase();
+          if (seen[key] && seen[key] !== uom) {
+            throw new Error("Unit alias \"" + token + "\" is used by both " + seen[key] + " and " + uom + ".");
+          }
+          seen[key] = uom;
+        });
+        map[uom] = { export: exportName, accept: accept };
+      });
+      return map;
+    }
+
+    function getCatalogSource() {
+      var el = document.getElementById("catalog_source");
+      return el && el.value === "csv" ? "csv" : "api";
+    }
+
+    function setCatalogSource(value) {
+      var el = document.getElementById("catalog_source");
+      if (el) el.value = value === "csv" ? "csv" : "api";
+      updateCatalogSourceUi();
+    }
+
+    function setCsvHeaderHint(error) {
+      var hint = document.getElementById("csv-header-hint");
+      var pathEl = document.getElementById("catalog_csv_path");
+      if (!hint) return;
+      var hasPath = pathEl && pathEl.value.trim();
+      if (!hasPath) hint.textContent = "Choose a CSV file.";
+      else if (error === "missing") hint.textContent = "CSV file was not found.";
+      else if (error === "invalid") hint.textContent = "Could not read the CSV header.";
+      else hint.textContent = "Column lists use the first row of this file.";
+    }
+
+    function currentCsvFields() {
+      var fields = {};
+      CSV_FIELDS.forEach(function(field) {
+        var el = document.getElementById("csv-field-" + field);
+        fields[field] = el ? el.value : "";
+      });
+      return fields;
+    }
+
+    function renderFieldMapping(headers, fields) {
+      var names = Array.isArray(headers) ? headers.slice() : [];
+      var chosen = fields || {};
+      CSV_FIELDS.forEach(function(field) {
+        var sel = document.getElementById("csv-field-" + field);
+        if (!sel) return;
+        var selected = chosen[field] != null ? String(chosen[field]) : "";
+        var options = names.slice();
+        if (selected && options.indexOf(selected) < 0) options.unshift(selected);
+        sel.innerHTML = "";
+        var blank = document.createElement("option");
+        blank.value = "";
+        blank.textContent = "—";
+        sel.appendChild(blank);
+        options.forEach(function(header) {
+          var opt = document.createElement("option");
+          opt.value = header;
+          opt.textContent = header;
+          sel.appendChild(opt);
+        });
+        sel.value = selected || "";
+      });
+    }
+
+    function collectCsvFields() {
+      var fields = currentCsvFields();
+      if (getCatalogSource() === "csv" && !fields.code) {
+        throw new Error("Choose the CSV column for the product code.");
+      }
+      return fields;
+    }
+
+    function updateCatalogSourceUi() {
+      var freeEditMode = document.getElementById("free_edit_mode").checked;
+      ["catalog_api_url", "import_api_url", "offer_lines_api_url", "filemaker_api_key"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.disabled = freeEditMode;
+      });
+      var sourceEl = document.getElementById("catalog_source");
+      if (sourceEl) sourceEl.disabled = freeEditMode;
+      var validateEl = document.getElementById("catalog_validate_codes");
+      if (validateEl) validateEl.disabled = freeEditMode;
+      var unitInputs = document.querySelectorAll("#unit-map-body input");
+      for (var u = 0; u < unitInputs.length; u++) unitInputs[u].disabled = freeEditMode;
+      ["btn-browse-csv", "btn-clear-csv"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.disabled = freeEditMode;
+      });
+      var csvFields = document.querySelectorAll(".csv-field");
+      for (var c = 0; c < csvFields.length; c++) csvFields[c].disabled = freeEditMode;
+    }
+
+    function updateFreeEditModeUi() { updateCatalogSourceUi(); }
+
+    function browseCatalogCsv() {
+      if (typeof sketchup !== "undefined" && sketchup.pick_catalog_csv) sketchup.pick_catalog_csv();
+    }
+
+    function clearCatalogCsv() {
+      if (typeof sketchup !== "undefined" && sketchup.preview_catalog_csv) sketchup.preview_catalog_csv("");
+    }
+
+    window.onCatalogCsvPicked = function(data) {
+      var pathEl = document.getElementById("catalog_csv_path");
+      var previous = pathEl ? pathEl.value : "";
+      var next = data && data.path != null ? (data.path || "") : previous;
+      if (pathEl && data && data.path != null) pathEl.value = next;
+      setCsvHeaderHint(data && data.error);
+      var fields = currentCsvFields();
+      var headers = (data && data.headers) || [];
+      if (next !== previous) {
+        CSV_FIELDS.forEach(function(field) {
+          if (headers.indexOf(fields[field]) < 0) fields[field] = "";
+        });
+      }
+      renderFieldMapping(headers, fields);
+      updateCatalogSourceUi();
+    };
+
+    window.onSettingsLoaded = function(data) {
+      if (!data) return;
+      var el = document.getElementById("import_api_url");
+      if (el && data.import_api_url != null) el.value = data.import_api_url || "";
+      el = document.getElementById("offer_lines_api_url");
+      if (el && data.offer_lines_api_url != null) el.value = data.offer_lines_api_url || "";
+      el = document.getElementById("filemaker_api_key");
+      if (el && data.filemaker_api_key != null) el.value = data.filemaker_api_key || "";
+      el = document.getElementById("catalog_api_url");
+      if (el && data.catalog_api_url != null) el.value = data.catalog_api_url || "";
+      el = document.getElementById("catalog_validate_codes");
+      if (el) el.checked = data.catalog_validate_codes !== false && data.catalog_validate_codes !== "false";
+      el = document.getElementById("free_edit_mode");
+      if (el) el.checked = data.free_edit_mode === true || data.free_edit_mode === "true";
+      el = document.getElementById("catalog_csv_path");
+      if (el) el.value = data.catalog_csv_path || "";
+      renderUnitMap(data.unit_map);
+      renderFieldMapping(data.catalog_csv_headers, data.catalog_csv_fields);
+      setCsvHeaderHint(data.catalog_csv_header_error);
+      setCatalogSource(data.catalog_source || "api");
+    };
+
+    function showSaveError(message, tab) {
+      var msgEl = document.getElementById("message");
+      msgEl.textContent = message;
+      msgEl.className = "message error";
+      msgEl.style.display = "block";
+      if (tab) showTab(tab);
+    }
+
+    function saveSettings() {
+      var msgEl = document.getElementById("message");
+      if (typeof sketchup === "undefined" || !sketchup.save_settings) {
+        showSaveError("Plugin bridge not available.");
+        return;
+      }
+      var unitMap = null;
+      var csvFields = null;
+      try {
+        unitMap = collectUnitMap();
+      } catch (e) {
+        showSaveError(e.message || String(e), "filemaker");
+        return;
+      }
+      try {
+        csvFields = collectCsvFields();
+      } catch (e) {
+        showSaveError(e.message || String(e), "csv");
+        return;
+      }
+      var payload = {
+        import_api_url: document.getElementById("import_api_url").value.trim(),
+        offer_lines_api_url: document.getElementById("offer_lines_api_url").value.trim(),
+        filemaker_api_key: document.getElementById("filemaker_api_key").value.trim(),
+        catalog_api_url: document.getElementById("catalog_api_url").value.trim(),
+        catalog_validate_codes: document.getElementById("catalog_validate_codes").checked,
+        catalog_source: getCatalogSource(),
+        free_edit_mode: document.getElementById("free_edit_mode").checked,
+        unit_map: unitMap,
+        catalog_csv_path: document.getElementById("catalog_csv_path").value.trim(),
+        catalog_csv_fields: csvFields
+      };
+      try {
+        var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+        sketchup.save_settings(b64);
+      } catch (e) {
+        showSaveError("Failed to encode settings: " + (e.message || e));
+      }
+    }
+
+    window.onSettingsSaved = function(data) {
+      var msgEl = document.getElementById("message");
+      msgEl.style.display = "block";
+      if (data && data.error) {
+        msgEl.textContent = data.message || "Save failed.";
+        msgEl.className = "message error";
+        if (data.message && data.message.indexOf("CSV column") >= 0) showTab("csv");
+      } else {
+        msgEl.textContent = "Settings saved.";
+        msgEl.className = "message";
+      }
+    };
+
+    function closeDialog() {
+      if (typeof sketchup !== "undefined" && sketchup.close_dialog) sketchup.close_dialog();
+    }
+
+    (function init() {
+      showTab("general");
+      updateCatalogSourceUi();
+      renderUnitMap(null);
+      renderFieldMapping([], null);
+      function loadSettings() {
+        if (typeof sketchup !== "undefined" && sketchup.get_settings) sketchup.get_settings();
+      }
+      if (typeof sketchup !== "undefined" && sketchup.get_settings) loadSettings();
+      else setTimeout(loadSettings, 100);
+    })();
+  </script>
+</body>
+</html>

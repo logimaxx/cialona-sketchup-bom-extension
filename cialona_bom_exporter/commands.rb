@@ -1,11 +1,9 @@
 # commands.rb — UI::Command definitions and menu actions
 # ------------------------------------------------------------------------------
-# SketchUp pitfall: UI::Command is id-based; redefining the same command on
-# reload is fine. Menu items reference commands by name; after cleanup we
-# remove the menu and re-add it, so we always use the latest command defs.
-# Toolbar pitfall: the toolbar cannot be removed, only hidden, so after reload
-# the toolbar still holds the OLD Command. Use indirection: the block must
-# resolve the method at click time (via full constant path) so the latest code runs.
+# SketchUp pitfall: menus and toolbars cannot be removed. They are created once
+# per session and keep the original UI::Command objects across reload!.
+# The block must resolve the method at click time (via full constant path) so
+# the latest code runs.
 # ------------------------------------------------------------------------------
 
 module Logimaxx

@@ -1,7 +1,7 @@
-# ui/attributes.rb — Attribute editor dialog (BOM schema / export config)
+# ui/attributes.rb — Attribute editor dialog
 # ------------------------------------------------------------------------------
-# Schema: schema_version, items[] with code, label, uom, measure, scope,
-#        multiplier, rounding{mode, step}, params (measure-specific).
+# Saved on the component definition as schema_version and bom_rules:
+# code, label, uom, measure, category, rounding{mode, step}, params.material.
 # ------------------------------------------------------------------------------
 module Logimaxx
   module CialonaBOMExporter
@@ -15,7 +15,6 @@ module Logimaxx
           top_perimeter bottom_perimeter edge_length smart_length
           bbox_volume bbox_dimensions
         ].freeze
-        SCOPE_OPTIONS = %w[definition instance].freeze
         ROUNDING_MODES = %w[none ceil floor round].freeze
 
         def self.template_path

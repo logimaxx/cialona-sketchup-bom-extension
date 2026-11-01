@@ -48,7 +48,7 @@ module Logimaxx
       #   onCatalogCsvPicked -> ui/settings.rb (pick_catalog_csv, preview_catalog_csv)
       #   onCatalogSettings -> ui/attributes.rb (on_get_catalog_settings)
       #   onSketchUpSelection -> main.rb, ui/attributes.rb
-      #   onExportCheckResult, onInitialState, onPluginSettings, onExportResult -> ui/bom_exporter.rb
+      #   onInitialState, onPluginSettings, onExportResult -> ui/bom_exporter.rb
       def self.inject_json(dialog, js_callback_name, data)
         require "base64"
         json = data.to_json

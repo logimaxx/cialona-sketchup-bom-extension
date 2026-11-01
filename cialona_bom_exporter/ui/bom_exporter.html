@@ -470,12 +470,15 @@
         reportRows = (payload && payload.rows) ? payload.rows : [];
         reportRowsWithoutRules = (payload && payload.rows_without_rules) ? payload.rows_without_rules : [];
         reportRowsGeometryOnly = (payload && payload.rows_geometry_only) ? payload.rows_geometry_only : [];
-        pieceRows = (payload && payload.piece_rows) ? payload.piece_rows : [];
-        pieceLengthUnit = (payload && payload.piece_length_unit) ? payload.piece_length_unit : "in";
+        var hasPieceRows = !!(payload && Object.prototype.hasOwnProperty.call(payload, "piece_rows"));
+        if (hasPieceRows) {
+          pieceRows = Array.isArray(payload.piece_rows) ? payload.piece_rows : [];
+          if (payload.piece_length_unit) pieceLengthUnit = payload.piece_length_unit;
+        }
         renderTable(reportRows, "report-body", reportRowCells);
         renderTableNoRules(reportRowsWithoutRules);
         renderTableGeometryOnly(reportRowsGeometryOnly);
-        renderPieceTable(pieceRows);
+        if (hasPieceRows) renderPieceTable(pieceRows);
         var totalLines = reportRows.length + reportRowsWithoutRules.length + reportRowsGeometryOnly.length;
         syncActionButtons();
         // document.getElementById("btn-api").disabled = totalLines === 0;
@@ -805,20 +808,6 @@
       return r.exportable !== false && r.exportable !== "false";
     }
 
-    var pendingExportAction = null;
-
-    window.onExportCheckResult = function(data) {
-      if (!data || !data.allowed) {
-        logExportDebug("export blocked " + ((data && data.message) || ""));
-        if (data && data.message) alert(data.message);
-        pendingExportAction = null;
-        return;
-      }
-      if (pendingExportAction === "csv") doExportCsv();
-      else if (pendingExportAction === "api") sketchup.get_plugin_settings();
-      pendingExportAction = null;
-    };
-
     function doExportCsv() {
       var byCode = {};
       var exportableWithRules = reportRows.filter(isExportable);
@@ -856,11 +845,6 @@
       if (exportableWithRules.length === 0) {
         logExportDebug("csv refused: no exportable components with rules");
         alert("No exportable data: no components with BOM rules are marked as exportable.");
-        return;
-      }
-      if (typeof sketchup !== "undefined" && sketchup.check_export_allowed) {
-        pendingExportAction = "csv";
-        sketchup.check_export_allowed();
         return;
       }
       doExportCsv();
@@ -1181,12 +1165,7 @@
         alert("Please click \"Load offer lines\" first so export can update existing FileMaker lines (avoid duplicates).");
         return;
       }
-      if (typeof sketchup === "undefined" || !sketchup.check_export_allowed) {
-        if (typeof sketchup !== "undefined" && sketchup.get_plugin_settings) sketchup.get_plugin_settings();
-        return;
-      }
-      pendingExportAction = "api";
-      sketchup.check_export_allowed();
+      if (typeof sketchup !== "undefined" && sketchup.get_plugin_settings) sketchup.get_plugin_settings();
     }
 
     window.onPluginSettings = function(data) {

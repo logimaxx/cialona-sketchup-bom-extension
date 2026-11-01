@@ -10,13 +10,6 @@
 
 module Logimaxx
   module CialonaBOMExporter
-    # --------------------------------------------------------------------------
-    # Time bomb: when true, BOM export (scan, CSV, FileMaker, API) is disabled after TIME_BOMB_CUTOFF.
-    # Use Time (core Ruby, no require). Set TIME_BOMB_ENABLED = true before release to client.
-    # --------------------------------------------------------------------------
-    TIME_BOMB_ENABLED = false
-    TIME_BOMB_CUTOFF = Time.new(2027, 5, 31, 23, 59, 59)
-
     # When the user opens another file or switches document, re-attach selection observer to the new model.
     class ModelSwitchObserver < Sketchup::AppObserver
       def onNewModel(model)

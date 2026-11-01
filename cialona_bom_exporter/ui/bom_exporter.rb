@@ -33,24 +33,6 @@ module Logimaxx
           dialog.add_action_callback('get_plugin_settings') { |*_| on_get_plugin_settings(dialog) }
           dialog.add_action_callback('get_initial_state') { |*_| on_get_initial_state(dialog) }
           dialog.add_action_callback('set_project_id') { |_ctx, project_id| on_set_project_id(project_id) }
-          dialog.add_action_callback('check_export_allowed') { |*_| on_check_export_allowed(dialog) }
-        end
-
-        # Returns [blocked, message]. When blocked, message is the reason to show the user.
-        def self.export_blocked?
-          ns = Logimaxx::CialonaBOMExporter
-          return [false, nil] unless ns.const_defined?(:TIME_BOMB_ENABLED) && ns::TIME_BOMB_ENABLED
-          cutoff = ns.const_defined?(:TIME_BOMB_CUTOFF) ? ns::TIME_BOMB_CUTOFF : nil
-          return [false, nil] unless cutoff
-          return [false, nil] if Time.now <= cutoff
-          date_str = cutoff.respond_to?(:strftime) ? cutoff.strftime("%Y-%m-%d") : cutoff.to_s
-          [true, "BOM export has been disabled after #{date_str}. Please contact the supplier at sergiu@logmaxx.ro."]
-        end
-
-        def self.on_check_export_allowed(dialog)
-          blocked, message = export_blocked?
-          payload = blocked ? { allowed: false, message: message } : { allowed: true }
-          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportCheckResult", payload)
         end
 
         def self.on_get_initial_state(dialog)
@@ -106,16 +88,7 @@ module Logimaxx
           dict = definition.attribute_dictionary(BOM_RULES_DICT, true)
           is_exportable = (exportable == true || exportable == 1 || exportable.to_s.downcase == "true")
           dict["exportable"] = is_exportable ? "true" : "false"
-          result = Logimaxx::CialonaBOMExporter::BOM::Exporter.export(model)
-          payload = {
-            rows: result[:rows],
-            rows_without_rules: result[:rows_without_rules] || [],
-            rows_geometry_only: result[:rows_geometry_only] || [],
-            piece_rows: result[:piece_rows] || [],
-            piece_length_unit: result[:piece_length_unit] || "in",
-            model_length_unit: result[:model_length_unit] || "in"
-          }
-          Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", payload)
+          refresh_quantity_report(dialog, model)
         end
 
         def self.on_set_exportable_bulk(dialog, definition_ids_json, exportable)
@@ -132,13 +105,17 @@ module Logimaxx
             dict = definition.attribute_dictionary(BOM_RULES_DICT, true)
             dict["exportable"] = val
           end
+          refresh_quantity_report(dialog, model)
+        end
+
+        # Quantity rows only. The piece list comes from its own scan, and this
+        # payload leaves piece_rows out so the dialog keeps the rows it has.
+        def self.refresh_quantity_report(dialog, model)
           result = Logimaxx::CialonaBOMExporter::BOM::Exporter.export(model)
           payload = {
-            rows: result[:rows],
+            rows: result[:rows] || [],
             rows_without_rules: result[:rows_without_rules] || [],
             rows_geometry_only: result[:rows_geometry_only] || [],
-            piece_rows: result[:piece_rows] || [],
-            piece_length_unit: result[:piece_length_unit] || "in",
             model_length_unit: result[:model_length_unit] || "in"
           }
           Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", payload)
@@ -156,12 +133,6 @@ module Logimaxx
 
         def self.on_run_export(dialog, export_type = "quantities")
           puts "[BOM Export] on_run_export called"
-          blocked, message = export_blocked?
-          if blocked
-            ::UI.messagebox(message) if message
-            Logimaxx::CialonaBOMExporter::UI.inject_json(dialog, "onExportResult", { error: true, message: message })
-            return
-          end
           model = Sketchup.active_model
           unless model
             ::UI.messagebox("No active model.")
@@ -197,11 +168,6 @@ module Logimaxx
         end
 
         def self.on_save_bom_csv(csv_content)
-          blocked, message = export_blocked?
-          if blocked
-            ::UI.messagebox(message) if message
-            return
-          end
           return ::UI.messagebox("No content to save.") if csv_content.to_s.strip.empty?
           path = ::UI.savepanel("Save BOM as CSV", "", "bom_export.csv")
           return if path.nil? || path.empty?
@@ -211,11 +177,6 @@ module Logimaxx
         end
 
         def self.on_save_piece_csv(csv_content)
-          blocked, message = export_blocked?
-          if blocked
-            ::UI.messagebox(message) if message
-            return
-          end
           return ::UI.messagebox("No piece data to save.") if csv_content.to_s.strip.empty?
           path = ::UI.savepanel("Save detailed piece list as CSV", "", "piece_export.csv")
           return if path.nil? || path.empty?

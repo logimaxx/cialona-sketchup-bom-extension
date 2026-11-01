@@ -107,7 +107,33 @@ module Logimaxx
     end
 
     ROOT = __dir__
-    # DEV_MODE = File.exist?(File.join(ROOT, "DEV"))
+
+    # Reload and the debug panels follow the load location. The loader in
+    # Plugins falls back to ~/work/cialona_bom_exporter; that checkout is dev
+    # mode. An installed copy sits next to the loader and stays in normal mode.
+    def self.dev_mode?
+      return @dev_mode unless @dev_mode.nil?
+      anchor = loader_directory
+      anchor = (Sketchup.find_support_file("Plugins") rescue nil) if anchor.nil? || anchor.to_s.strip.empty?
+      @dev_mode = anchor ? !within_directory?(anchor, ROOT) : false
+    end
+
+    def self.loader_directory
+      feature = $LOADED_FEATURES.find { |loaded| File.basename(loaded) == "cialona_bom_exporter.rb" }
+      feature ? File.dirname(feature) : nil
+    end
+
+    def self.within_directory?(directory, path)
+      dir = normalize_load_path(directory)
+      child = normalize_load_path(path)
+      return false if dir.empty? || child.empty?
+      return true if child.casecmp(dir).zero?
+      child.downcase.start_with?("#{dir.downcase}/")
+    end
+
+    def self.normalize_load_path(path)
+      File.expand_path(path.to_s).tr("\\", "/").sub(%r{/+$}, "")
+    end
 
     # Preferabil: nu umbla la $LOAD_PATH, folosește require_relative.
     FILES = %w[
@@ -120,7 +146,7 @@ module Logimaxx
 
 
     FILES.each { |rel| require_relative rel }
-    require_relative "dev" if File.exist?(File.join(ROOT, "DEV"))
+    require_relative "dev" if dev_mode?
 
     # init runs on every load, including reload!. UI creation is guarded below.
 
@@ -151,7 +177,7 @@ module Logimaxx
       return if @menu
 
       @menu = ::UI.menu("Extensions").add_submenu(MENU_TITLE)
-      @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.reload_dev_command)
+      @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.reload_dev_command) if dev_mode?
       @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.export_bom_command)
       @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.attributes_command)
       @menu.add_item(Logimaxx::CialonaBOMExporter::Commands.settings_command)
@@ -168,7 +194,7 @@ module Logimaxx
       @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.attributes_command)
       @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.settings_command)
       # @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.to_be_implemented_command)
-      @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.reload_dev_command)
+      @toolbar.add_item(Logimaxx::CialonaBOMExporter::Commands.reload_dev_command) if dev_mode?
       @toolbar_built = true
     end
 

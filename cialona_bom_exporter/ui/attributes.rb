@@ -58,7 +58,7 @@ module Logimaxx
             free_edit_mode: settings.stored_free_edit_mode,
             catalog_source: catalog_source,
             unit_map: settings.stored_unit_map,
-            dev_mode: File.exist?(File.join(Logimaxx::CialonaBOMExporter::ROOT, "DEV")),
+            dev_mode: Logimaxx::CialonaBOMExporter.dev_mode?,
             csv_items: [],
             csv_loaded: false,
             csv_error: nil

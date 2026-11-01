@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build a SketchUp .rbz: loader + extension folder at the archive root.
-# SketchUp installs that pair into Plugins. The DEV marker and icon backups
-# stay out, so reload mode is off in the package.
+# SketchUp installs that pair into Plugins. Icon backups stay out.
+# Dev mode follows the load path, so this installed copy does not enable it.
+# A leftover DEV marker is not shipped.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")" && pwd)"

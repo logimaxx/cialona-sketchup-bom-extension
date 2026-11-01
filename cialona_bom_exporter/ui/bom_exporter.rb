@@ -42,7 +42,7 @@ module Logimaxx
             project_id: project_id,
             free_edit_mode: free_edit_mode,
             unit_map: Logimaxx::CialonaBOMExporter::UI::Settings.stored_unit_map,
-            dev_mode: File.exist?(File.join(Logimaxx::CialonaBOMExporter::ROOT, "DEV"))
+            dev_mode: Logimaxx::CialonaBOMExporter.dev_mode?
           })
         end
 

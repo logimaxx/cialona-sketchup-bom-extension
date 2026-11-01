@@ -11,7 +11,7 @@ module Logimaxx
     module Commands
 
       def self.reload_dev
-        return unless File.exist?(File.join(Logimaxx::CialonaBOMExporter::ROOT, "DEV"))
+        return unless Logimaxx::CialonaBOMExporter.dev_mode?
         Logimaxx::CialonaBOMExporter.reload!
         ::UI.messagebox("Reload completed.")
       end
